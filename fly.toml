@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for zigpkg on 2024-07-26T11:12:57Z
+# fly.toml app configuration file generated for ziglist on 2024-08-01T13:25:36Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'zigpkg'
-primary_region = 'sin'
+app = 'ziglist'
+primary_region = 'iad'
 
 [build]
 
@@ -18,4 +18,4 @@ primary_region = 'sin'
 
 [[vm]]
   size = 'shared-cpu-1x'
-  memory = 256
+  memory = '512'
