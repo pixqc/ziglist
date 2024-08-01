@@ -1,0 +1,7 @@
+.env
+.http-fetch/
+db.sqlite
+db.sqlite-shm
+db.sqlite-wal
+indexer-queue.txt
+tailwind.css

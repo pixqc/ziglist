@@ -1,0 +1,66 @@
+- good logs
+- r2: sqlite backup, db seed for testing
+
+dark mode
+save the zon and build zig locally on sqlite, then search later, update metadata
+
+zigdir.org?
+zigindex.org
+
+is_package:
+- "zig fetch" filename:readme.md
+
+inspo
+- https://github.com/leanprover/reservoir
+- https://github.com/leanprover/reservoir-index
+
+- https://api.github.com/repos/Cloudef/zig-aio/languages
+  - use this to determine whether a thing is worth indexing?
+- parse the b "thing" in build.zig and display it on site
+- search for "zig fetch" in readmes..
+- dependency graph for the zons
+- "what c/cpp project builds with zig"
+- the focus should 100% be on the build.zig and the zon files, not stars
+
+design:
+- the simplest mvp possible: newest zig packages!
+- name not fixed in stone, use .org
+- input: build.zig.zon and build.zig, output: htmls
+- not registry, it's like golang
+  - inspiration: pkg.go.dev, crates.io
+- support github/gitlab/bitbucket/codeberg/srht
+- autodoc for each pkg, i'll handle it for u (advanced, maybe)
+- experiences:
+  - 'i wonder whats the most popular pkg 7d'
+  - 'whats the most popular pkg of all time'
+  - 'does this pkg support zig version X'
+  - 'what high-star repo uses zigs build system (eg. ggml)'
+- since i dont have the raw download log, certain things arent possible
+  - "most popular 7d" kind of stuff isn't possible
+
+tech:
+- bun js + templating lang + htmx?
+- postgres? redis even? maybe sqlite?
+- coolify + hetzner
+
+how:
+- keep track of all git repos
+
+links:
+- looks like i would need to use pupeeteer
+- https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-code
+- https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories#search-based-on-when-a-repository-was-created-or-last-updated
+- https://github.com/ksegla/GitHubMiner/blob/main/index.js
+- https://github.com/golang/pkgsite
+
+ways to index:
+- repositories search
+- commit search
+- search zon files, and get the urls there
+- manual indexing for edge cases
+- code search should be last resort
+
+notes on api:
+- language: null, i check it's an actual zig project?
+- some emtpy repos are returned to me and im like what
+- false positives are OK? can filter on my end
