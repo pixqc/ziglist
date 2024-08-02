@@ -269,7 +269,7 @@ queueZon.listenQueue(async (url) => {
     };
 
     const now = Math.floor(Date.now() / 1000);
-    const delaySeconds = Math.max(0, rateLimit.reset - now);
+    const delaySeconds = Math.max(0, rateLimit.reset - now) + 1;
     const delayMs = delaySeconds * 1000;
 
     logger.log(
