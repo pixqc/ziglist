@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { db, kv } from "./trunk.js";
+import { db, kv, log } from "./trunk.js";
 
 const LucideChevronLeft = () => (
   <svg
@@ -122,7 +122,9 @@ const RepoCard = ({ repo }) => {
         {repo.owner}/{repo.name}
       </h3>
       <p className="text-sm text-stone-700 dark:text-stone-300 mb-2 break-words">
-        {repo.description}
+        {repo.descriptionk.length > 120
+          ? repo.description.slice(0, 120) + "..."
+          : repo.description}
       </p>
       <div className="flex-grow"></div>
       {repo.dependencies && repo.dependencies.length > 0 && (
@@ -325,6 +327,13 @@ const BaseLayout = ({ children, currentPath, page }) => (
 
 const app = new Hono();
 
+app.use("*", async (c, next) => {
+  const start = Date.now();
+  await next();
+  const ms = Date.now() - start;
+  log("info", `${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`);
+});
+
 app.get("/", async (c) => {
   const perPage = 30;
   const page = parseInt(c.req.query("page") || "1", 10);
@@ -338,6 +347,7 @@ app.get("/", async (c) => {
   `);
   let repos = stmt.all(perPage, offset);
   stmt.finalize();
+
   repos = await Promise.all(repos.map(async (repo) => {
     const metadata = await kv.get([repo.full_name, "metadata"]);
     return {
@@ -346,6 +356,12 @@ app.get("/", async (c) => {
       dependencies: metadata.value?.dependencies,
     };
   }));
+
+  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
+  const kvFetched = repos.filter(isKv);
+
+  const path = `GET /?page=${page}`;
+  log("info", `${path} - ${repos.length} from db, ${kvFetched.length} from kv`);
   return c.html(
     <BaseLayout currentPath="/" page={page}>
       <RepoGrid repos={Object.values(repos)} />
@@ -365,6 +381,7 @@ app.get("/new", async (c) => {
   `);
   let repos = stmt.all(perPage, offset);
   stmt.finalize();
+
   repos = await Promise.all(repos.map(async (repo) => {
     const metadata = await kv.get([repo.full_name, "metadata"]);
     return {
@@ -373,6 +390,12 @@ app.get("/new", async (c) => {
       dependencies: metadata.value?.dependencies,
     };
   }));
+
+  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
+  const kvFetched = repos.filter(isKv);
+
+  const path = `GET /new?page=${page}`;
+  log("info", `${path} - ${repos.length} from db, ${kvFetched.length} from kv`);
   return c.html(
     <BaseLayout currentPath="/new" page={page}>
       <RepoGrid repos={Object.values(repos)} />
@@ -393,6 +416,7 @@ app.get("/top", async (c) => {
   `);
   let repos = stmt.all(perPage, offset);
   stmt.finalize();
+
   repos = await Promise.all(repos.map(async (repo) => {
     const metadata = await kv.get([repo.full_name, "metadata"]);
     return {
@@ -401,6 +425,12 @@ app.get("/top", async (c) => {
       dependencies: metadata.value?.dependencies,
     };
   }));
+
+  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
+  const kvFetched = repos.filter(isKv);
+
+  const path = `GET /top?page=${page}`;
+  log("info", `${path} - ${repos.length} from db, ${kvFetched.length} from kv`);
   return c.html(
     <BaseLayout currentPath="/top" page={page}>
       <RepoGrid repos={Object.values(repos)} />
@@ -418,4 +448,6 @@ app.notFound((c) => {
   return c.html(<Page404 />, 404);
 });
 
+const port = 8080;
+log("info", `listening on ${port}`);
 Deno.serve({ port: 8080 }, app.fetch);

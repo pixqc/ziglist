@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { GITHUB_API_KEY } from "./trunk.js";
-import { db, kv } from "./trunk.js";
+import { db, GITHUB_API_KEY, kv, log } from "./trunk.js";
 
 const SchemaFile = z.object({
   name: z.string(),
@@ -80,8 +79,6 @@ const makeZonURLs = (repos) =>
 
 const queueZon = await Deno.openKv(":memory:");
 const queueRepos = await Deno.openKv(":memory:");
-
-console.log("starting indexer");
 
 Deno.cron("hourly index", "0 * * * *", async () => {
   const now = new Date();
@@ -227,3 +224,5 @@ queueZon.listenQueue(async (url) => {
   const parsed = SchemaFile.parse(data);
   await kv.set([parsed.fullName, "metadata"], extractZon(parsed.content));
 });
+
+log("info", "indexer started");
