@@ -2,6 +2,10 @@
 import "jsr:@std/dotenv/load";
 import { Database } from "jsr:@db/sqlite@0.11";
 
+/**
+ * Creates a logger object with log and flush methods.
+ * @returns {Object} Logger object with log and flush methods.
+ */
 const createLogger = () => {
   let buffer = [];
   return {
@@ -30,13 +34,22 @@ Deno.cron("flush logs", "* * * * *", async () => {
   await logger.flush();
 });
 
-// A wise man once said:
-// Runtime crashes are better than bugs.
-// Compile errors are better than runtime crashes.
+/**
+ * Logs a fatal error message and exits the program.
+ *
+ * A wise man once said:
+ * Runtime crashes are better than bugs.
+ * Compile errors are better than runtime crashes.
+ *
+ * @param {string} message - Error message to log.
+ */
 export const fatal = (message) => {
   console.error(`fatal: ${message}`);
   Deno.exit(1);
 };
+
+// TODO: do health check then if expire fatal
+// "github-authentication-token-expiration": "2025-07-26 00:00:00 +0000",
 
 export const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -79,4 +92,5 @@ db.exec(`
     foreign key (dependency_repo_id) references zigrepos (id)
   )
 `);
+
 logger.log("info", "database tables created");
