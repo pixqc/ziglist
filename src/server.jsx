@@ -103,6 +103,8 @@ const SpecialCard = () => {
       </h3>
       <p className="text-sm text-stone-700 dark:text-stone-300 mb-2">
         Codeberg+GitLab support, zigmod+gyro support, dependency graph, etc.
+        Feature requests? Missing dependencies in one of the pkgs/projects? Let
+        me know!
       </p>
       <div className="flex-grow"></div>
       <a
@@ -111,7 +113,7 @@ const SpecialCard = () => {
         rel="noopener noreferrer"
         className="inline-block w-full text-center text-xs py-1.5 bg-[#eeedec] dark:bg-[#363230] text-stone-800 dark:text-stone-200 rounded-md hover:bg-stone-300 dark:hover:bg-stone-600 transition-colors"
       >
-        Feature request
+        GitHub Issues
       </a>
     </div>
   );
