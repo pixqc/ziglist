@@ -95,17 +95,24 @@ const RepoDetail = ({ kind, value }) => (
   </div>
 );
 
-// deno-lint-ignore no-unused-vars
 const SpecialCard = () => {
   return (
-    <div className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block hover:bg-stone-100 dark:hover:bg-stone-900 transition">
+    <div className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block">
       <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1">
-        codeberg/gitlab
+        More features coming soon!
       </h3>
       <p className="text-sm text-stone-700 dark:text-stone-300 mb-2">
-        Codeberg and GitLab support coming soon!
+        Codeberg+GitLab support, zigmod+gyro support, dependency graph, etc.
       </p>
       <div className="flex-grow"></div>
+      <a
+        href="https://github.com/pixqc/ziglist/issues"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-block w-full text-center text-xs py-1.5 bg-[#eeedec] dark:bg-[#363230] text-stone-800 dark:text-stone-200 rounded-md hover:bg-stone-300 dark:hover:bg-stone-600 transition-colors"
+      >
+        Feature request
+      </a>
     </div>
   );
 };
@@ -116,7 +123,7 @@ const RepoCard = ({ repo }) => {
       href={`https://github.com/${repo.owner}/${repo.name}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block hover:bg-stone-100 dark:hover:bg-stone-900 transition"
+      className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors"
     >
       <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1 hover:underline break-words">
         {repo.owner}/{repo.name}
@@ -156,11 +163,13 @@ const RepoCard = ({ repo }) => {
   );
 };
 
-const RepoGrid = ({ repos }) => {
+const RepoGrid = ({ repos, page, currentPath }) => {
   const repoElements = repos.map((repo) => (
     <RepoCard key={repo.id} repo={repo} />
   ));
-  // repoElements.splice(2, 0, <SpecialCard key="special" />);
+  if (currentPath === "/" && page === 1) {
+    repoElements.splice(2, 0, <SpecialCard key="special" />);
+  }
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
       {repoElements}
@@ -340,8 +349,8 @@ app.use("*", async (c, next) => {
 });
 
 app.get("/", async (c) => {
-  const perPage = 30;
   const page = parseInt(c.req.query("page") || "1", 10);
+  const perPage = page === 1 ? 29 : 30;
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
     SELECT *
@@ -372,7 +381,7 @@ app.get("/", async (c) => {
   );
   return c.html(
     <BaseLayout currentPath="/" page={page}>
-      <RepoGrid repos={Object.values(repos)} />
+      <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
     </BaseLayout>,
   );
 });

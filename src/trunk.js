@@ -21,6 +21,7 @@ const createLogger = () => {
       }
     },
     flush: async () => {
+      if (buffer.length === 0) return;
       const bufStr = buffer.join("\n") + "\n";
       await Deno.writeTextFile("log.txt", bufStr, { append: true });
       buffer = [];
@@ -29,8 +30,8 @@ const createLogger = () => {
 };
 
 export const logger = createLogger();
+
 Deno.cron("flush logs", "* * * * *", async () => {
-  logger.log("info", "flushing logs");
   await logger.flush();
 });
 
@@ -43,14 +44,11 @@ Deno.cron("flush logs", "* * * * *", async () => {
  *
  * @param {string} message - Error message to log.
  */
-export const fatal = (message) => {
-  logger.log("fatal", message);
+export const fatal = (message, data) => {
+  logger.log("fatal", message, data);
   logger.flush();
   Deno.exit(1);
 };
-
-// TODO: do health check then if expire fatal
-// "github-authentication-token-expiration": "2025-07-26 00:00:00 +0000",
 
 export const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -104,3 +102,41 @@ db.exec(`
 `);
 
 logger.log("info", "database tables created");
+
+// older zig projects don't have dependencies in their zon
+const dependenciesMap = [
+  { fullName: "zigzap/zap", dependencies: ["facil.io"] },
+  {
+    fullName: "oven-sh/bun",
+    dependencies: [
+      "boringssl",
+      "brotli",
+      "c-ares",
+      "diffz",
+      "libarchive",
+      "lol-html",
+      "ls-hpack",
+      "mimalloc",
+      "patches",
+      "picohttpparser",
+      "tinycc",
+      "zig-clap",
+      "zig",
+      "zlib",
+      "zstd",
+    ],
+  },
+  {
+    fullName: "buzz-language/buzz",
+    dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
+  },
+  { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
+];
+
+for (const { fullName, dependencies } of dependenciesMap) {
+  const metadata = {
+    dependencies,
+    minZigVersion: undefined,
+  };
+  await kv.set([fullName, "metadata"], metadata);
+}
