@@ -1,13 +1,13 @@
 {
   "tasks": {
-    "start:indexer": "IS_PROD=1 deno run --unstable-ffi --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --unstable-cron --env ./src/indexer.js",
-    "start:server:hono": "IS_PROD=1 deno run --unstable-ffi --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --env ./src/server.jsx",
+    "start:indexer": "IS_PROD=1 deno run --unstable-ffi --unstable-cron --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --unstable-cron --env ./src/indexer.js",
+    "start:server:hono": "IS_PROD=1 deno run --unstable-ffi --unstable-cron --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --env ./src/server.jsx",
     "start:tailwind": "IS_PROD=1 deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --minify",
     "start:server": "deno task start:server:hono & deno task start:tailwind",
     "start": "deno task start:indexer & deno task start:server",
 
-    "dev:indexer": "deno run --unstable-ffi --unstable-kv --allow-ffi --allow-env --allow-read --allow-write --allow-net --watch --unstable-cron --env ./src/indexer.js",
-    "dev:server:hono": "deno run --unstable-ffi --unstable-kv --allow-ffi --allow-env --allow-read --allow-write --allow-net --watch --env ./src/server.jsx",
+    "dev:indexer": "deno run --unstable-ffi --unstable-cron --unstable-kv --allow-ffi --allow-env --allow-read --allow-write --allow-net --watch --unstable-cron --env ./src/indexer.js",
+    "dev:server:hono": "deno run --unstable-ffi --unstable-cron --unstable-kv --allow-ffi --allow-env --allow-read --allow-write --allow-net --watch --env ./src/server.jsx",
     "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --watch --minify",
     "dev:server": "deno task dev:server:hono & deno task dev:tailwind",
     "dev": "deno task dev:indexer & deno task dev:server"

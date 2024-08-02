@@ -2,12 +2,33 @@
 import "jsr:@std/dotenv/load";
 import { Database } from "jsr:@db/sqlite@0.11";
 
-export const log = (level, message, data) => {
-  const now = new Date().toISOString();
-  const msg = `${now} ${level.toUpperCase()}: ${message}`;
-  if (data) console.log(msg, data);
-  else console.log(msg);
+const createLogger = () => {
+  let buffer = [];
+  return {
+    log: (level, message, data) => {
+      const now = new Date().toISOString();
+      const msg = `${now} ${level.toUpperCase()}: ${message}`;
+      if (data) {
+        buffer.push(`${msg} ${JSON.stringify(data)}`);
+        console.log(msg, data);
+      } else {
+        buffer.push(msg);
+        console.log(msg);
+      }
+    },
+    flush: async () => {
+      const bufStr = buffer.join("\n") + "\n";
+      await Deno.writeTextFile("log.txt", bufStr, { append: true });
+      buffer = [];
+    },
+  };
 };
+
+export const logger = createLogger();
+Deno.cron("flush logs", "* * * * *", async () => {
+  logger.log("info", "flushing logs");
+  await logger.flush();
+});
 
 // A wise man once said:
 // Runtime crashes are better than bugs.
@@ -19,10 +40,10 @@ export const fatal = (message) => {
 
 export const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
-log("info", "GITHUB_API_KEY is set and exported");
+logger.log("info", "GITHUB_API_KEY is set and exported");
 
 export const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
+logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 export const kv = await Deno.openKv("db.sqlite");
 export const db = new Database("db.sqlite");
@@ -58,4 +79,4 @@ db.exec(`
     foreign key (dependency_repo_id) references zigrepos (id)
   )
 `);
-log("info", "database tables created");
+logger.log("info", "database tables created");

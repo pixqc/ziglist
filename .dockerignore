@@ -4,3 +4,4 @@ db.sqlite
 db.sqlite-shm
 db.sqlite-wal
 indexer-queue.txt
+log.txt
