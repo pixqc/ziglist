@@ -44,7 +44,8 @@ Deno.cron("flush logs", "* * * * *", async () => {
  * @param {string} message - Error message to log.
  */
 export const fatal = (message) => {
-  console.error(`fatal: ${message}`);
+  logger.log("fatal", message);
+  logger.flush();
   Deno.exit(1);
 };
 
@@ -53,6 +54,15 @@ export const fatal = (message) => {
 
 export const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+
+// crash if healthcheck fails
+const headers = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  Authorization: `Bearer ${GITHUB_API_KEY}`,
+};
+const response = await fetch("https://api.github.com/zen", { headers });
+if (!response.ok) fatal(`GitHub API key is invalid: ${response.statusText}`);
 logger.log("info", "GITHUB_API_KEY is set and exported");
 
 export const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
