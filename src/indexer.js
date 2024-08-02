@@ -98,13 +98,22 @@ Deno.cron("hourly index", "0 * * * *", async () => {
   await queueRepos.enqueue(url);
 });
 
-Deno.cron("entire index", "* * * * *", async () => {
+const controller = new AbortController();
+
+Deno.cron("index all", "* * * * *", {
+  signal: controller.signal,
+}, async () => {
   const zigInitDate = new Date("2015-07-04");
   const res = db.prepare("SELECT MIN(created_at) FROM zigrepos").get();
   const end = res["MIN(created_at)"]
     ? new Date(res["MIN(created_at)"] * 1000)
     : new Date();
   const start = new Date(end - 30 * 24 * 60 * 60 * 1000);
+  if (end < zigInitDate) {
+    logger.log("info", "cron indexer.js by date - done");
+    controller.abort();
+    return;
+  }
   const url = makeReposURL(start, end, 1);
   logger.log(
     "info",
