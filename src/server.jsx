@@ -251,7 +251,7 @@ const Pagination = ({ currentPath, page }) => {
     "px-2 py-2 flex items-center text-stone-400 dark:text-stone-500 hover:text-stone-900 dark:hover:text-stone-100 transition-colors";
 
   return (
-    <nav className="flex justify-center mb-10">
+    <nav className="flex justify-center mb-6">
       <div className="flex items-center space-x-4">
         <a
           href={`${currentPath}?page=${prevPage}`}
@@ -276,7 +276,7 @@ const Pagination = ({ currentPath, page }) => {
 };
 
 const Footer = () => (
-  <div className="flex max-w-4xl mx-auto p-3 mb-6 space-x-4 items-center">
+  <div className="flex max-w-4xl mx-auto px-3 mb-6 space-x-4 items-center">
     <div className="flex-grow flex flex-col">
       <div className="h-1/2 border-b border-stone-100 dark:border-stone-800">
       </div>
