@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { db, GITHUB_API_KEY, kv, log } from "./trunk.js";
+import { db, GITHUB_API_KEY, kv, logger } from "./trunk.js";
 
 const SchemaFile = z.object({
   name: z.string(),
@@ -55,7 +55,8 @@ const SchemaRepo = z.object({
 }));
 
 /**
- * Returns a GitHub url that fetches repositories created between start and end
+ * Generates URLs for fetching Zig-related repositories from GitHub.
+ * Date range is for avoiding rate limits.
  *
  * @param {Date} start
  * @param {Date} end
@@ -69,9 +70,15 @@ const makeReposURL = (start, end, page) => {
   }Z`;
   const query = `in:name,description,topics zig created:${dateRange}`;
   const encodedQuery = encodeURIComponent(query);
-  return `${base}?q=${encodedQuery}&per_page=20&page=${page}`;
+  return `${base}?q=${encodedQuery}&per_page=100&page=${page}`;
 };
 
+/**
+ * Generates URLs for fetching build.zig.zon files in GitHub repositories.
+ *
+ * @param {string[]} repos
+ * @returns {string[]}
+ */
 const makeZonURLs = (repos) =>
   repos.map((repo) =>
     `https://api.github.com/repos/${repo}/contents/build.zig.zon`
@@ -84,6 +91,10 @@ Deno.cron("hourly index", "0 * * * *", async () => {
   const now = new Date();
   const start = new Date(now - 24 * 60 * 60 * 1000);
   const url = makeReposURL(start, now, 1);
+  logger.log(
+    "info",
+    `cron indexer.js hourly - ${start.toISOString()} - ${now.toISOString()}`,
+  );
   await queueRepos.enqueue(url);
 });
 
@@ -95,11 +106,14 @@ Deno.cron("entire index", "* * * * *", async () => {
     : new Date();
   const start = new Date(end - 30 * 24 * 60 * 60 * 1000);
   const url = makeReposURL(start, end, 1);
+  logger.log(
+    "info",
+    `cron indexer.js by date - ${start.toISOString()} - ${end.toISOString()}`,
+  );
   await queueRepos.enqueue(url);
 });
 
 queueRepos.listenQueue(async (url) => {
-  console.log(`fetching ${url}`);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -108,7 +122,23 @@ queueRepos.listenQueue(async (url) => {
 
   const response = await fetch(url, { headers });
   if (response.status === 403) {
-    queueRepos.enqueue(url, { delay: 60 * 60 * 1000 });
+    logger.log("info", `repo fetch - status 403 - ${url}`);
+
+    const rateLimit = {
+      limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
+      remaining: parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
+      reset: parseInt(response.headers.get("x-ratelimit-reset") || "0"),
+    };
+
+    const now = Math.floor(Date.now() / 1000);
+    const delaySeconds = Math.max(0, rateLimit.reset - now);
+    const delayMs = delaySeconds * 1000;
+
+    logger.log(
+      "info",
+      `repo fetch - retrying in ${delaySeconds} seconds - ${url}`,
+    );
+    queueRepos.enqueue(url, { delay: delayMs });
     return;
   }
 
@@ -124,6 +154,7 @@ queueRepos.listenQueue(async (url) => {
 
   const data = await response.json();
   const items = data.items.filter(Boolean);
+  logger.log("info", `repo fetch - status 200 - len ${items.length} - ${url}`);
   const parsed = items.map(SchemaRepo.parse);
 
   const insertQuery = `
@@ -162,14 +193,15 @@ queueRepos.listenQueue(async (url) => {
     ]);
 
     upsertMany(rows);
-    console.log(`inserted into db: ${rows.length}`);
+    logger.log("info", `repo bulk insert - len ${rows.length}`);
   } catch (error) {
-    console.error("error in bulk insert:", error);
+    logger.log("error", `repo bulk insert - ${error}`);
   } finally {
     stmt.finalize();
 
     const zonURLs = makeZonURLs(parsed.map((item) => item.full_name));
-    zonURLs.slice(0, 5).map((url) => queueZon.enqueue(url));
+    logger.log("info", `queueing zon fetch - len ${zonURLs.length}`);
+    zonURLs.map((url) => queueZon.enqueue(url));
   }
 });
 
@@ -206,7 +238,6 @@ const extractZon = (zon) => {
 };
 
 queueZon.listenQueue(async (url) => {
-  console.log(url);
   const headers = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -214,15 +245,37 @@ queueZon.listenQueue(async (url) => {
   };
   const response = await fetch(url, { headers });
 
-  if (response.status === 404) return;
+  if (response.status === 404) {
+    logger.log("info", `zon fetch - status 404 - ${url}`);
+    return;
+  }
+
   if (response.status === 403) {
-    queueZon.enqueue(url, { delay: 60 * 60 * 1000 });
+    logger.log("info", `zon fetch - status 403 - ${url}`);
+
+    const rateLimit = {
+      limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
+      remaining: parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
+      reset: parseInt(response.headers.get("x-ratelimit-reset") || "0"),
+    };
+
+    const now = Math.floor(Date.now() / 1000);
+    const delaySeconds = Math.max(0, rateLimit.reset - now);
+    const delayMs = delaySeconds * 1000;
+
+    logger.log(
+      "info",
+      `zon fetch - retrying in ${delaySeconds} seconds - ${url}`,
+    );
+    queueZon.enqueue(url, { delay: delayMs });
     return;
   }
 
   const data = await response.json();
   const parsed = SchemaFile.parse(data);
+  logger.log("info", `zon fetch - status 200 - ${url}`);
   await kv.set([parsed.fullName, "metadata"], extractZon(parsed.content));
+  logger.log("info", `zon insert kv - ${parsed.fullName}`);
 });
 
-log("info", "indexer started");
+logger.log("info", "indexer started");
