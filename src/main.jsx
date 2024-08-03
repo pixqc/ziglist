@@ -3,7 +3,7 @@ import { Database } from "jsr:@db/sqlite@0.11";
 import { Hono } from "hono";
 import { z } from "zod";
 
-// ============================================================================
+// ----------------------------------------------------------------------------
 // utils
 
 /**
@@ -51,9 +51,9 @@ const createLogger = () => {
   };
 };
 
+const logger = createLogger();
+
 /**
- * Logs a fatal error message and exits the program.
- *
  * A wise man once said:
  * Runtime crashes are better than bugs.
  * Compile errors are better than runtime crashes.
@@ -62,16 +62,15 @@ const createLogger = () => {
  * @param {Object} [data] - Additional data to log (optional).
  */
 const fatal = (message, data) => {
-  const logger = createLogger();
   logger.log("fatal", message, data);
-  void logger.flush();
-  Deno.exit(1);
+  logger.flush().then(() => {
+    Deno.exit(1);
+  });
 };
 
 /**
- * Generates URLs for fetching Zig-related repositories from GitHub.
- * Date range is for avoiding rate limits.
  * https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories
+ * Date range is for avoiding rate limits.
  *
  * @param {Date} start
  * @param {Date} end
@@ -100,7 +99,6 @@ const makeZonURLs = (repos) =>
   );
 
 /**
- * Extracts data from a build.zig.zon file.
  * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
  *
  * @param {string} zon - The contents of the zon file.
@@ -141,26 +139,14 @@ const extractZon = (zon) => {
   return { dependencies, minZigVersion };
 };
 
-const logger = createLogger();
-const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
-if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
-
-const headers = {
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": "2022-11-28",
-  Authorization: `Bearer ${GITHUB_API_KEY}`,
-};
-const response = await fetch("https://api.github.com/zen", { headers });
-if (!response.ok) fatal(`GitHub API key is invalid: ${response.statusText}`);
-logger.log("info", "GITHUB_API_KEY is valid and usable");
-
-const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
-
 const kv = await Deno.openKv("db.sqlite");
 const db = new Database("db.sqlite");
 
-db.exec(`
+/**
+ * @returns {void}
+ */
+const initDatabase = () => {
+  db.exec(`
   create table if not exists zigrepos (
     id integer primary key autoincrement,
     repo_id integer unique,
@@ -181,10 +167,8 @@ db.exec(`
   )
 `);
 
-logger.log("info", "database tables created");
-
-// useful for making dependency graph, currently not used
-db.exec(`
+  // useful for making dependency graph, currently not used
+  db.exec(`
   create table if not exists dependencies (
     id integer primary key autoincrement,
     repo_id integer,
@@ -193,47 +177,97 @@ db.exec(`
     foreign key (dependency_repo_id) references zigrepos (id)
   )
 `);
+};
 
-// older zig projects don't have dependencies in their zon
-const dependenciesMap = [
-  { fullName: "zigzap/zap", dependencies: ["facil.io"] },
-  {
-    fullName: "oven-sh/bun",
-    dependencies: [
-      "boringssl",
-      "brotli",
-      "c-ares",
-      "diffz",
-      "libarchive",
-      "lol-html",
-      "ls-hpack",
-      "mimalloc",
-      "patches",
-      "picohttpparser",
-      "tinycc",
-      "zig-clap",
-      "zig",
-      "zlib",
-      "zstd",
-    ],
-  },
-  {
-    fullName: "buzz-language/buzz",
-    dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
-  },
-  { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
-];
+/**
+ * Older Zig projects usually don't have a build.zig.zon file.
+ *
+ * @returns {Promise<void>}
+ */
+async function initDependencies() {
+  const dependenciesMap = [
+    { fullName: "zigzap/zap", dependencies: ["facil.io"] },
+    {
+      fullName: "oven-sh/bun",
+      dependencies: [
+        "boringssl",
+        "brotli",
+        "c-ares",
+        "diffz",
+        "libarchive",
+        "lol-html",
+        "ls-hpack",
+        "mimalloc",
+        "patches",
+        "picohttpparser",
+        "tinycc",
+        "zig-clap",
+        "zig",
+        "zlib",
+        "zstd",
+      ],
+    },
+    {
+      fullName: "buzz-language/buzz",
+      dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
+    },
+    { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
+  ];
 
-for (const { fullName, dependencies } of dependenciesMap) {
-  const metadata = {
-    dependencies,
-    minZigVersion: undefined,
-  };
-  await kv.set([fullName, "metadata"], metadata);
+  for (const { fullName, dependencies } of dependenciesMap) {
+    const metadata = {
+      dependencies,
+      minZigVersion: undefined,
+    };
+    await kv.set([fullName, "metadata"], metadata);
+  }
 }
 
-// ============================================================================
-// components
+const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
+if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+
+const healthcheckGithub = async () => {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    Authorization: `Bearer ${GITHUB_API_KEY}`,
+  };
+  const response = await fetch("https://api.github.com/zen", { headers });
+  if (!response.ok) fatal(`GitHub API key is invalid: ${response.statusText}`);
+  logger.log("info", "GITHUB_API_KEY is valid and usable");
+};
+
+const healthcheckKv = async () => {
+  try {
+    const _ = await kv.get(["oven-sh/bun", "metadata"]);
+    logger.log("info", "kv is working");
+  } catch (e) {
+    fatal(e);
+  }
+};
+
+const healthcheckDb = () => {
+  try {
+    const _ = db.prepare("SELECT COUNT(*) FROM zigrepos").get();
+    logger.log("info", "database is working");
+  } catch (e) {
+    fatal(e);
+  }
+};
+
+// should crash if any of the healthchecks fail
+initDatabase();
+await initDependencies();
+await healthcheckGithub();
+await healthcheckKv();
+healthcheckDb();
+
+const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
+logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
+
+// ----------------------------------------------------------------------------
+// jsx components
+// note: this is not React, jsx is only for templating
 
 const LucideChevronLeft = () => (
   <svg
@@ -568,7 +602,7 @@ const BaseLayout = ({ children, currentPath, page }) => (
   </>
 );
 
-// ============================================================================
+// ----------------------------------------------------------------------------
 // routes
 
 const app = new Hono();
@@ -711,7 +745,7 @@ const port = 8080;
 logger.log("info", `listening on ${port}`);
 Deno.serve({ port: 8080 }, app.fetch);
 
-// ============================================================================
+// ----------------------------------------------------------------------------
 // crons
 
 const SchemaFile = z.object({
