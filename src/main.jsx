@@ -225,16 +225,21 @@ async function initDependencies() {
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+const githubHeaders = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  Authorization: `Bearer ${GITHUB_API_KEY}`,
+};
 
 const healthcheckGithub = async () => {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${GITHUB_API_KEY}`,
-  };
-  const response = await fetch("https://api.github.com/zen", { headers });
-  if (!response.ok) fatal(`GitHub API key is invalid: ${response.statusText}`);
-  logger.log("info", "GITHUB_API_KEY is valid and usable");
+  try {
+    const _ = await fetch("https://api.github.com/zen", {
+      headers: githubHeaders,
+    });
+    logger.log("info", "GITHUB_API_KEY is valid and usable");
+  } catch (e) {
+    fatal(`GitHub API key is invalid: ${e}`);
+  }
 };
 
 const healthcheckKv = async () => {
@@ -843,13 +848,7 @@ Deno.cron("index all", "* * * * *", {
 });
 
 queueRepos.listenQueue(async (url) => {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${GITHUB_API_KEY}`,
-  };
-
-  const response = await fetch(url, { headers });
+  const response = await fetch(url, { headers: githubHeaders });
   if (response.status === 403) {
     logger.log("info", `repo fetch - status 403 - ${url}`);
 
@@ -935,12 +934,7 @@ queueRepos.listenQueue(async (url) => {
 });
 
 queueZon.listenQueue(async (url) => {
-  const headers = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    Authorization: `Bearer ${GITHUB_API_KEY}`,
-  };
-  const response = await fetch(url, { headers });
+  const response = await fetch(url, { headers: githubHeaders });
 
   if (response.status === 404) {
     logger.log("info", `zon fetch - status 404 - ${url}`);
