@@ -2,7 +2,7 @@
   "version": "3",
   "packages": {
     "specifiers": {
-      "jsr:@db/sqlite@0.11": "jsr:@db/sqlite@0.11.1",
+      "jsr:@db/sqlite@^0.11.1": "jsr:@db/sqlite@0.11.1",
       "jsr:@denosaurs/plug@1": "jsr:@denosaurs/plug@1.0.6",
       "jsr:@hono/hono@^4.5.1": "jsr:@hono/hono@4.5.1",
       "jsr:@std/assert@^0.217.0": "jsr:@std/assert@0.217.0",
@@ -700,7 +700,8 @@
   "workspace": {
     "dependencies": [
       "jsr:@db/sqlite@^0.11.1",
-      "jsr:@hono/hono@^4.5.1"
+      "jsr:@hono/hono@^4.5.1",
+      "jsr:@std/dotenv"
     ]
   }
 }

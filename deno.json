@@ -9,6 +9,7 @@
     "dev": "deno task dev:tailwind & deno task dev:main"
   },
   "imports": {
+    "@std/dotenv/load": "jsr:@std/dotenv/load",
     "zod": "https://deno.land/x/zod@v3.16.1/mod.ts",
     "sqlite": "jsr:@db/sqlite@^0.11.1",
     "hono": "jsr:@hono/hono@^4.5.1"
