@@ -1,5 +1,5 @@
 import "jsr:@std/dotenv/load";
-import { Database } from "jsr:@db/sqlite@0.11";
+import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -88,14 +88,14 @@ const makeReposURL = (start, end, page) => {
 };
 
 /**
- * Generates URLs for fetching build.zig.zon files in GitHub repositories.
+ * Generates URLs for fetching raw build.zig.zon files in GitHub repositories.
  *
  * @param {string[]} repos
  * @returns {string[]}
  */
 const makeZonURLs = (repos) =>
   repos.map((repo) =>
-    `https://api.github.com/repos/${repo}/contents/build.zig.zon`
+    `https://raw.githubusercontent.com/${repo}/main/build.zig.zon`
   );
 
 /**
@@ -927,9 +927,9 @@ queueRepos.listenQueue(async (url) => {
   } finally {
     stmt.finalize();
 
-    const zonURLs = makeZonURLs(parsed.map((item) => item.full_name));
-    logger.log("info", `queueing zon fetch - len ${zonURLs.length}`);
-    zonURLs.map((url) => queueZon.enqueue(url));
+    // const zonURLs = makeZonURLs(parsed.map((item) => item.full_name));
+    // logger.log("info", `queueing zon fetch - len ${zonURLs.length}`);
+    // zonURLs.map((url) => queueZon.enqueue(url));
   }
 });
 
