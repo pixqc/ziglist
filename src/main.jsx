@@ -1,4 +1,4 @@
-import "jsr:@std/dotenv/load";
+import "@std/dotenv/load";
 import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -7,12 +7,9 @@ import { z } from "zod";
 // utils
 
 /**
- * Log level types.
+ * Creates a logger object with log and flush methods.
  * @typedef {('info' | 'error' | 'warn' | 'debug' | 'fatal')} LogLevel
- */
-
-/**
- * Creates a logger with buffered writing capability.
+ *
  * @returns {{
  *   log: (level: LogLevel, message: string, data?: any) => void,
  *   flush: () => Promise<void>
@@ -52,8 +49,12 @@ const createLogger = () => {
 };
 
 const logger = createLogger();
+const db = new Database("db.sqlite");
+const workerRepoFetch = await Deno.openKv(":memory:");
 
 /**
+ * Crashes the program with an error message.
+ *
  * A wise man once said:
  * Runtime crashes are better than bugs.
  * Compile errors are better than runtime crashes.
@@ -69,8 +70,8 @@ const fatal = (message, data) => {
 };
 
 /**
+ * Creates repo search URL for the given date range and page on GitHub.
  * https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories
- * Date range is for avoiding rate limits.
  *
  * @param {Date} start
  * @param {Date} end
@@ -88,18 +89,10 @@ const makeReposURL = (start, end, page) => {
 };
 
 /**
- * Generates URLs for fetching raw build.zig.zon files in GitHub repositories.
+ * Extracts data from a build.zig.zon file.
  *
- * @param {string[]} repos
- * @returns {string[]}
- */
-const makeZonURLs = (repos) =>
-  repos.map((repo) =>
-    `https://raw.githubusercontent.com/${repo}/main/build.zig.zon`
-  );
-
-/**
  * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
+ * TODO: might as well extract everything while we're at it
  *
  * @param {string} zon - The contents of the zon file.
  * @returns {ZonData} An object containing the extracted dependencies and minimum Zig version.
@@ -139,89 +132,73 @@ const extractZon = (zon) => {
   return { dependencies, minZigVersion };
 };
 
-const kv = await Deno.openKv("db.sqlite");
-const db = new Database("db.sqlite");
-
 /**
+ * Initializes the SQLite database.
+ *
  * @returns {void}
  */
 const initDatabase = () => {
+  db.exec(`PRAGMA journal_mode = WAL`);
   db.exec(`
-  create table if not exists zigrepos (
-    id integer primary key autoincrement,
-    repo_id integer unique,
-    name text,
-    owner text,
-    full_name text,
-    description text null,
-    homepage text null,
-    license text null,
-    created_at integer,
-    updated_at integer,
-    pushed_at integer,
-    stars integer,
-    forks integer,
-    default_branch text,
-    html_url text,
-    language text
-  )
-`);
+    create table if not exists zigrepos (
+      full_name text primary key,
+      name text,
+      owner text,
+      description text null,
+      homepage text null,
+      license text null,
+      created_at integer,
+      updated_at integer,
+      pushed_at integer,
+      stars integer,
+      forks integer,
+      default_branch text,
+      html_url text,
+      language text,
 
-  // useful for making dependency graph, currently not used
+      build_zig_exists boolean null,
+      build_zig_fetched_at integer null,
+      build_zig_zon_exists boolean null,
+      build_zig_zon_fetched_at integer null
+    )`);
   db.exec(`
-  create table if not exists dependencies (
-    id integer primary key autoincrement,
-    repo_id integer,
-    dependency_repo_id integer,
-    foreign key (repo_id) references zigrepos (id),
-    foreign key (dependency_repo_id) references zigrepos (id)
-  )
-`);
+    create table if not exists dependencies (
+      id integer primary key autoincrement,
+      repo_full_name text,
+      depends_on text,
+      foreign key (repo_full_name) references zigrepos (full_name),
+      foreign key (depends_on) references zigrepos (full_name)
+    )`);
 };
 
-/**
- * Older Zig projects usually don't have a build.zig.zon file.
- *
- * @returns {Promise<void>}
- */
-async function initDependencies() {
-  const dependenciesMap = [
-    { fullName: "zigzap/zap", dependencies: ["facil.io"] },
-    {
-      fullName: "oven-sh/bun",
-      dependencies: [
-        "boringssl",
-        "brotli",
-        "c-ares",
-        "diffz",
-        "libarchive",
-        "lol-html",
-        "ls-hpack",
-        "mimalloc",
-        "patches",
-        "picohttpparser",
-        "tinycc",
-        "zig-clap",
-        "zig",
-        "zlib",
-        "zstd",
-      ],
-    },
-    {
-      fullName: "buzz-language/buzz",
-      dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
-    },
-    { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
-  ];
-
-  for (const { fullName, dependencies } of dependenciesMap) {
-    const metadata = {
-      dependencies,
-      minZigVersion: undefined,
-    };
-    await kv.set([fullName, "metadata"], metadata);
-  }
-}
+const dependenciesMap = [
+  { fullName: "zigzap/zap", dependencies: ["facil.io"] },
+  {
+    fullName: "oven-sh/bun",
+    dependencies: [
+      "boringssl",
+      "brotli",
+      "c-ares",
+      "diffz",
+      "libarchive",
+      "lol-html",
+      "ls-hpack",
+      "mimalloc",
+      "patches",
+      "picohttpparser",
+      "tinycc",
+      "zig-clap",
+      "zig",
+      "zlib",
+      "zstd",
+    ],
+  },
+  {
+    fullName: "buzz-language/buzz",
+    dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
+  },
+  { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
+];
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -242,15 +219,6 @@ const healthcheckGithub = async () => {
   }
 };
 
-const healthcheckKv = async () => {
-  try {
-    const _ = await kv.get(["oven-sh/bun", "metadata"]);
-    logger.log("info", "kv is working");
-  } catch (e) {
-    fatal(e);
-  }
-};
-
 const healthcheckDb = () => {
   try {
     const _ = db.prepare("SELECT COUNT(*) FROM zigrepos").get();
@@ -260,12 +228,19 @@ const healthcheckDb = () => {
   }
 };
 
+const healthcheckRepoFetch = async () => {
+  const now = new Date();
+  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const url = makeReposURL(start, now, 1);
+  await workerRepoFetch.enqueue(url);
+  // TODO: fatal this if things go wrong
+};
+
 // should crash if any of the healthchecks fail
 initDatabase();
-await initDependencies();
 await healthcheckGithub();
-await healthcheckKv();
 healthcheckDb();
+healthcheckRepoFetch();
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
 logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
@@ -622,7 +597,7 @@ app.use("*", async (c, next) => {
   );
 });
 
-app.get("/", async (c) => {
+app.get("/", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const perPage = page === 1 ? 29 : 30;
   const offset = (page - 1) * perPage;
@@ -633,27 +608,11 @@ app.get("/", async (c) => {
     ORDER BY pushed_at DESC
     LIMIT ? OFFSET ?
   `);
-  let repos = stmt.all(perPage, offset);
+  const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  repos = await Promise.all(repos.map(async (repo) => {
-    const metadata = await kv.get([repo.full_name, "metadata"]);
-
-    return {
-      ...repo,
-      minZigVersion: metadata?.value?.minZigVersion ?? undefined,
-      dependencies: metadata?.value?.dependencies ?? undefined,
-    };
-  }));
-
-  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
-  const kvFetched = repos.filter(isKv);
-
   const path = `GET /?page=${page}`;
-  logger.log(
-    "info",
-    `${path} - ${repos.length} from db, ${kvFetched.length} from kv`,
-  );
+  logger.log("info", `${path} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
@@ -661,7 +620,7 @@ app.get("/", async (c) => {
   );
 });
 
-app.get("/new", async (c) => {
+app.get("/new", (c) => {
   const perPage = 30;
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
@@ -671,26 +630,11 @@ app.get("/new", async (c) => {
     ORDER BY created_at DESC
     LIMIT ? OFFSET ?
   `);
-  let repos = stmt.all(perPage, offset);
+  const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  repos = await Promise.all(repos.map(async (repo) => {
-    const metadata = await kv.get([repo.full_name, "metadata"]);
-    return {
-      ...repo,
-      minZigVersion: metadata.value?.minZigVersion,
-      dependencies: metadata.value?.dependencies,
-    };
-  }));
-
-  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
-  const kvFetched = repos.filter(isKv);
-
   const path = `GET /new?page=${page}`;
-  logger.log(
-    "info",
-    `${path} - ${repos.length} from db, ${kvFetched.length} from kv`,
-  );
+  logger.log("info", `${path} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/new" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/new" page={page} />
@@ -698,7 +642,7 @@ app.get("/new", async (c) => {
   );
 });
 
-app.get("/top", async (c) => {
+app.get("/top", (c) => {
   const perPage = 30;
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
@@ -709,26 +653,11 @@ app.get("/top", async (c) => {
     ORDER BY stars DESC
     LIMIT ? OFFSET ?
   `);
-  let repos = stmt.all(perPage, offset);
+  const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  repos = await Promise.all(repos.map(async (repo) => {
-    const metadata = await kv.get([repo.full_name, "metadata"]);
-    return {
-      ...repo,
-      minZigVersion: metadata.value?.minZigVersion,
-      dependencies: metadata.value?.dependencies,
-    };
-  }));
-
-  const isKv = (repo) => repo.minZigVersion || repo.dependencies?.length > 0;
-  const kvFetched = repos.filter(isKv);
-
   const path = `GET /top?page=${page}`;
-  logger.log(
-    "info",
-    `${path} - ${repos.length} from db, ${kvFetched.length} from kv`,
-  );
+  logger.log("info", `${path} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/top" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
@@ -751,25 +680,9 @@ logger.log("info", `listening on ${port}`);
 Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
-// crons
-
-const SchemaFile = z.object({
-  name: z.string(),
-  content: z.string().transform((content) => atob(content)),
-  encoding: z.string(),
-  url: z.string(),
-}).transform(({ url, ...rest }) => {
-  const parts = url.split("/");
-  const repoOwner = parts[4];
-  const repoName = parts[5];
-  return {
-    fullName: `${repoOwner}/${repoName}`,
-    ...rest,
-  };
-});
+// schemas
 
 const SchemaRepo = z.object({
-  id: z.number(),
   name: z.string(),
   full_name: z.string(),
   owner: z.object({
@@ -795,9 +708,8 @@ const SchemaRepo = z.object({
   homepage: z.string().nullish(),
   default_branch: z.string(),
 }).transform((
-  { id, owner, license, stargazers_count, forks_count, homepage, ...rest },
+  { owner, license, stargazers_count, forks_count, homepage, ...rest },
 ) => ({
-  repo_id: id,
   owner: owner.login,
   license: license?.spdx_id || null,
   stars: stargazers_count,
@@ -806,25 +718,22 @@ const SchemaRepo = z.object({
   ...rest,
 }));
 
-const queueZon = await Deno.openKv(":memory:");
-const queueRepos = await Deno.openKv(":memory:");
+// ----------------------------------------------------------------------------
+// indexer
 
-Deno.cron("hourly index", "0 * * * *", async () => {
+Deno.cron("repo index hourly", "0 * * * *", async () => {
   const now = new Date();
   const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const url = makeReposURL(start, now, 1);
   logger.log(
     "info",
-    `cron indexer.js hourly - ${start.toISOString()} - ${now.toISOString()}`,
+    `repo hourly cron - ${start.toISOString()} - ${now.toISOString()}`,
   );
-  await queueRepos.enqueue(url);
+  await workerRepoFetch.enqueue(url);
 });
 
 const controller = new AbortController();
-
-// TODO: separeate zon index, fetch 5k/hr (limit), 80/min
-
-Deno.cron("index all", "* * * * *", {
+Deno.cron("repo index all", "* * * * *", {
   signal: controller.signal,
 }, async () => {
   const zigInitDate = new Date("2015-07-04");
@@ -835,19 +744,19 @@ Deno.cron("index all", "* * * * *", {
   const end = minCreatedAt ? new Date(Number(minCreatedAt) * 1000) : new Date();
   const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
   if (end < zigInitDate) {
-    logger.log("info", "cron indexer.js by date - done");
+    logger.log("info", "repo index by date - done");
     controller.abort();
     return;
   }
   const url = makeReposURL(start, end, 1);
   logger.log(
     "info",
-    `cron indexer.js by date - ${start.toISOString()} - ${end.toISOString()}`,
+    `repo index by date - ${start.toISOString()} - ${end.toISOString()}`,
   );
-  await queueRepos.enqueue(url);
+  await workerRepoFetch.enqueue(url);
 });
 
-queueRepos.listenQueue(async (url) => {
+workerRepoFetch.listenQueue(async (url) => {
   const response = await fetch(url, { headers: githubHeaders });
   if (response.status === 403) {
     logger.log("info", `repo fetch - status 403 - ${url}`);
@@ -866,7 +775,7 @@ queueRepos.listenQueue(async (url) => {
       "info",
       `repo fetch - retrying in ${delaySeconds} seconds - ${url}`,
     );
-    queueRepos.enqueue(url, { delay: delayMs });
+    workerRepoFetch.enqueue(url, { delay: delayMs });
     return;
   }
 
@@ -877,7 +786,7 @@ queueRepos.listenQueue(async (url) => {
       part.includes('rel="next"')
     );
     const next = nextLink?.match(/<(.*)>/)?.[1];
-    if (next !== undefined) queueRepos.enqueue(next, { delay: 1000 });
+    if (next !== undefined) workerRepoFetch.enqueue(next, { delay: 1000 });
   }
 
   const data = await response.json();
@@ -887,11 +796,11 @@ queueRepos.listenQueue(async (url) => {
 
   const insertQuery = `
     INSERT OR REPLACE INTO zigrepos (
-      repo_id, name, owner, full_name, description, homepage, license,
+      name, owner, full_name, description, homepage, license,
       created_at, updated_at, pushed_at, stars, forks, default_branch,
       html_url, language
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `;
   const stmt = db.prepare(insertQuery);
@@ -903,7 +812,6 @@ queueRepos.listenQueue(async (url) => {
 
   try {
     const rows = parsed.map((item) => [
-      item.repo_id,
       item.name,
       item.owner,
       item.full_name,
@@ -926,51 +834,11 @@ queueRepos.listenQueue(async (url) => {
     logger.log("error", `repo bulk insert - ${error}`);
   } finally {
     stmt.finalize();
-
-    // const zonURLs = makeZonURLs(parsed.map((item) => item.full_name));
-    // logger.log("info", `queueing zon fetch - len ${zonURLs.length}`);
-    // zonURLs.map((url) => queueZon.enqueue(url));
   }
-});
-
-queueZon.listenQueue(async (url) => {
-  const response = await fetch(url, { headers: githubHeaders });
-
-  if (response.status === 404) {
-    logger.log("info", `zon fetch - status 404 - ${url}`);
-    return;
-  }
-
-  if (response.status === 403) {
-    logger.log("info", `zon fetch - status 403 - ${url}`);
-
-    const rateLimit = {
-      limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
-      remaining: parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
-      reset: parseInt(response.headers.get("x-ratelimit-reset") || "0"),
-    };
-
-    const now = Math.floor(Date.now() / 1000);
-    const delaySeconds = Math.max(0, rateLimit.reset - now) + 1;
-    const delayMs = delaySeconds * 1000;
-
-    logger.log(
-      "info",
-      `zon fetch - retrying in ${delaySeconds} seconds - ${url}`,
-    );
-    queueZon.enqueue(url, { delay: delayMs });
-    return;
-  }
-
-  const data = await response.json();
-  const parsed = SchemaFile.parse(data);
-  logger.log("info", `zon fetch - status 200 - ${url}`);
-  await kv.set([parsed.fullName, "metadata"], extractZon(parsed.content));
-  logger.log("info", `zon insert kv - ${parsed.fullName}`);
 });
 
 logger.log("info", "indexer started");
 
-Deno.cron("flush logs", "* * * * *", async () => {
+setInterval(async () => {
   await logger.flush();
-});
+}, 10 * 1000);
