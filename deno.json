@@ -1,13 +1,14 @@
 {
   "tasks": {
-    "start:main": "IS_PROD=1 deno run --unstable-ffi --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --unstable-cron --env ./src/main.jsx",
+    "start:main": "IS_PROD=1 deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env ./src/main.jsx",
     "start:tailwind": "IS_PROD=1 deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --minify",
     "start": "deno task start:tailwind && deno task start:main",
 
-    "dev:main": "deno run --unstable-ffi --allow-ffi --unstable-kv --allow-env --allow-read --allow-write --allow-net --unstable-cron --env --watch ./src/main.jsx",
+    "dev:main": "deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env --watch ./src/main.jsx",
     "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --watch --minify",
     "dev": "deno task dev:tailwind & deno task dev:main"
   },
+  "unstable": ["ffi", "kv", "cron"],
   "imports": {
     "@std/dotenv/load": "jsr:@std/dotenv/load",
     "zod": "https://deno.land/x/zod@v3.16.1/mod.ts",
