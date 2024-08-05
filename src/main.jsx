@@ -83,6 +83,7 @@ const makeReposURL = (start, end, page) => {
   const dateRange = `${start.toISOString().slice(0, 19)}Z..${
     end.toISOString().slice(0, 19)
   }Z`;
+  // const query = `language:zig`;
   const query = `in:name,description,topics zig created:${dateRange}`;
   const encodedQuery = encodeURIComponent(query);
   return `${base}?q=${encodedQuery}&per_page=100&page=${page}`;
