@@ -88,51 +88,31 @@ const makeReposURL = (start, end, page) => {
   return `${base}?q=${encodedQuery}&per_page=100&page=${page}`;
 };
 
+const makeZonURL = ([repo, branch]) =>
+  `https://raw.githubusercontent.com/${repo}/${branch}/build.zig.zon`;
+
 /**
  * Extracts data from a build.zig.zon file.
+ * TODO: untested
  *
  * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
- * TODO: might as well extract everything while we're at it
  *
  * @param {string} zon - The contents of the zon file.
- * @returns {ZonData} An object containing the extracted dependencies and minimum Zig version.
- * @typedef {Object} ZonData
- * @property {string[]} dependencies - An array of dependencies.
- * @property {string|undefined} minZigVersion - The minimum Zig version required.
  */
-const extractZon = (zon) => {
-  const zonWithoutComments = zon.replace(/\/\/.*$/gm, "");
-  const minZigVersionMatch = zonWithoutComments.match(
-    /\.minimum_zig_version\s*=\s*"([^"]+)"/,
-  );
-  const minZigVersion = minZigVersionMatch ? minZigVersionMatch[1] : undefined;
-
-  const dependencies = [];
-  const dependencyRegex = /\.(?:@"([^"]+)"|(\w+))(?=\s*=)/g;
-  const excludedKeys = new Set([
-    "name",
-    "version",
-    "paths",
-    "dependencies",
-    "hash",
-    "lazy",
-    "url",
-    "path",
-    "minimum_zig_version",
-  ]);
-
-  let match;
-  while ((match = dependencyRegex.exec(zonWithoutComments)) !== null) {
-    const dependency = match[1] || match[2];
-    if (!excludedKeys.has(dependency)) {
-      dependencies.push(dependency);
-    }
-  }
-
-  return { dependencies, minZigVersion };
-};
+function zon2json(zon) {
+  return zon
+    .replace(/(?<!:)\/\/.*$/gm, "")
+    .replace(/\.\{""}/g, ".{}")
+    .replace(/.{/g, "{")
+    .replace(/.@"(\w+(?:-\w+)*)"?\s*=\s*/g, '"$1": ')
+    .replace(/.(\w+)\s*=\s*/g, '"$1": ')
+    .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]")
+    .replace(/,(\s*[}\]])/g, "$1");
+}
 
 /**
+ * TODO: deps hash should be the pk btw, not the name
+ *
  * Initializes the SQLite database.
  *
  * @returns {void}
