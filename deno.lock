@@ -10,6 +10,7 @@
       "jsr:@std/dotenv": "jsr:@std/dotenv@0.225.0",
       "jsr:@std/encoding@^0.221.0": "jsr:@std/encoding@0.221.0",
       "jsr:@std/fmt@^0.221.0": "jsr:@std/fmt@0.221.0",
+      "jsr:@std/fs": "jsr:@std/fs@0.221.0",
       "jsr:@std/fs@^0.221.0": "jsr:@std/fs@0.221.0",
       "jsr:@std/path@0.217": "jsr:@std/path@0.217.0",
       "jsr:@std/path@^0.221.0": "jsr:@std/path@0.221.0",
@@ -701,7 +702,8 @@
     "dependencies": [
       "jsr:@db/sqlite@^0.11.1",
       "jsr:@hono/hono@^4.5.1",
-      "jsr:@std/dotenv"
+      "jsr:@std/dotenv",
+      "jsr:@std/fs"
     ]
   }
 }

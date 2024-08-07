@@ -2,6 +2,7 @@ import "@std/dotenv/load";
 import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
+import { ensureDirSync } from "@std/fs";
 
 // ----------------------------------------------------------------------------
 // utils
@@ -95,7 +96,7 @@ function zon2json(zon) {
 const initDatabase = () => {
   db.exec(`
     PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS zigrepos (
+    CREATE TABLE IF NOT EXISTS zig_repos (
       full_name TEXT PRIMARY KEY,
       name TEXT,
       owner TEXT,
@@ -116,31 +117,31 @@ const initDatabase = () => {
       build_zig_fetched_at INTEGER NULL,
       build_zig_zon_exists BOOLEAN NULL,
       build_zig_zon_fetched_at INTEGER NULL,
-      FOREIGN KEY (repo_full_name) REFERENCES zigrepos (full_name)
+      FOREIGN KEY (repo_full_name) REFERENCES zig_repos (full_name)
     );
     CREATE TABLE IF NOT EXISTS url_dependencies (
       hash TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       url TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS dependencies (
+    CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       repo_full_name TEXT NOT NULL,
       name TEXT NOT NULL,
       dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
       path TEXT,
       url_dependency_hash TEXT,
-      FOREIGN KEY (repo_full_name) REFERENCES zigrepos (full_name),
+      FOREIGN KEY (repo_full_name) REFERENCES zig_repos (full_name),
       FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash)
     );`);
 };
 
 const insertDependencies = () => {
   db.exec(`
-    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    INSERT INTO zig_repo_dependencies (repo_full_name, name, dependency_type, path)
     VALUES ('zigzap/zap', 'facil.io', 'path', 'facil.io');
 
-    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    INSERT INTO zig_repo_dependencies (repo_full_name, name, dependency_type, path)
     VALUES
       ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
       ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
@@ -158,14 +159,14 @@ const insertDependencies = () => {
       ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
       ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd');
 
-    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    INSERT INTO zig_repo_dependencies (repo_full_name, name, dependency_type, path)
     VALUES
       ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
       ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
       ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
       ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2');
 
-    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    INSERT INTO zig_repo_dependencies (repo_full_name, name, dependency_type, path)
     VALUES ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
 };
 
@@ -191,7 +192,7 @@ const healthcheckGithub = () => {
 
 const healthcheckDatabase = () => {
   try {
-    const _ = db.prepare("SELECT COUNT(*) FROM zigrepos").get();
+    const _ = db.prepare("SELECT COUNT(*) FROM zig_repos").get();
     logger.log("info", "database is working");
   } catch (e) {
     fatal(e);
@@ -224,8 +225,6 @@ healthcheckDatabase();
 healthcheckTailwind();
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-const ENABLE_REPO_FETCH = Deno.env.get("ENABLE_REPO_FETCH") !== undefined;
-const ENABLE_FILES_FETCH = Deno.env.get("ENABLE_FILES_FETCH") !== undefined;
 logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 // ----------------------------------------------------------------------------
@@ -583,7 +582,7 @@ app.get("/", (c) => {
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
     SELECT *
-    FROM zigrepos
+    FROM zig_repos
     WHERE stars >= 10 AND forks >= 10
     ORDER BY pushed_at DESC
     LIMIT ? OFFSET ?
@@ -606,7 +605,7 @@ app.get("/new", (c) => {
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
     SELECT *
-    FROM zigrepos
+    FROM zig_repos
     ORDER BY created_at DESC
     LIMIT ? OFFSET ?
   `);
@@ -628,7 +627,7 @@ app.get("/top", (c) => {
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
     SELECT *
-    FROM zigrepos
+    FROM zig_repos
     WHERE forks >= 10
     ORDER BY stars DESC
     LIMIT ? OFFSET ?
@@ -735,14 +734,13 @@ const a = setInterval(() => {
   const query = `language:zig`;
   const encodedQuery = encodeURIComponent(query);
   const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
-  console.log("abcd");
   workerRepoFetch.enqueue(url);
 }, MINUTELY);
 
 // fetch all zig-related repos to the beginning of time
 const b = setInterval(() => {
   const base = "https://api.github.com/search/repositories";
-  const res = db.prepare("SELECT MIN(created_at) FROM zigrepos").get();
+  const res = db.prepare("SELECT MIN(created_at) FROM zig_repos").get();
   const minCreatedAt = res && "MIN(created_at)" in res
     ? res["MIN(created_at)"]
     : null;
@@ -752,18 +750,17 @@ const b = setInterval(() => {
   const query = `in:name,description,topics zig created:${dateRange}`;
   const encodedQuery = encodeURIComponent(query);
   const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
-  console.log("abcd");
   workerRepoFetch.enqueue(url);
-}, SECONDLY * 5);
+}, MINUTELY);
 
 // temporarily disable for testing other stuff
-clearInterval(a);
+// clearInterval(a);
 clearInterval(b);
 
 workerRepoFetch.listenQueue(async (url) => {
   const response = await fetch(url, { headers: githubHeaders });
   if (response.status === 403) {
-    logger.log("info", `repo fetch - status 403 - ${url}`);
+    logger.log("info", `zig_repos fetch - status 403 - ${url}`);
 
     const rateLimit = {
       limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
@@ -777,7 +774,7 @@ workerRepoFetch.listenQueue(async (url) => {
 
     logger.log(
       "info",
-      `repo fetch - retrying in ${delaySeconds} seconds - ${url}`,
+      `zig_repos fetch - retrying in ${delaySeconds} seconds - ${url}`,
     );
     workerRepoFetch.enqueue(url, { delay: delayMs });
     return;
@@ -795,25 +792,28 @@ workerRepoFetch.listenQueue(async (url) => {
 
   const data = await response.json();
   const items = data.items.filter(Boolean);
-  logger.log("info", `repo fetch - status 200 - len ${items.length} - ${url}`);
+  logger.log(
+    "info",
+    `zig_repos fetch - status 200 - len ${items.length} - ${url}`,
+  );
   const parsed = items.map(SchemaRepo.parse);
 
-  const insertQuery = `
-    INSERT OR REPLACE INTO zigrepos (
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO zig_repos (
       full_name, name, owner, description, homepage, license, created_at,
       updated_at, pushed_at, stars, forks, default_branch, language
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
-  `;
-  const stmt = db.prepare(insertQuery);
-  const upsertMany = db.transaction((data) => {
-    for (const row of data) {
-      stmt.run(row);
-    }
-  });
+  `);
 
   try {
+    const upsertMany = db.transaction((data) => {
+      for (const row of data) {
+        stmt.run(row);
+      }
+    });
+
     const rows = parsed.map((item) => [
       item.full_name,
       item.name,
@@ -831,50 +831,101 @@ workerRepoFetch.listenQueue(async (url) => {
     ]);
 
     upsertMany(rows);
-    logger.log("info", `repo bulk insert - len ${rows.length}`);
+    logger.log("info", `zig_repos bulk insert - len ${rows.length}`);
   } catch (error) {
-    logger.log("error", `repo bulk insert - ${error}`);
+    logger.log("error", `zig_repos bulk insert - ${error}`);
   } finally {
-    stmt.finalize();
+    if (stmt) stmt.finalize();
   }
 });
 
-// WIP
+ensureDirSync("./.build-zig-files");
 setInterval(async () => {
   const query = db.prepare(`
     SELECT zr.full_name, zr.default_branch
-    FROM zigrepos zr
+    FROM zig_repos zr
     LEFT JOIN zig_build_files zbf ON zr.full_name = zbf.repo_full_name
     WHERE zbf.build_zig_zon_fetched_at IS NULL
     ORDER BY zr.stars DESC
-    LIMIT 3;
+    LIMIT 83;
   `);
   const repos = query.all();
   query.finalize();
-  console.log(repos);
 
-  let transactions = [];
+  logger.log(
+    "info",
+    `build.zig.zon fetch - fetching for ${repos.length} zon files`,
+  );
 
-  Promise.all(repos.map(async (repo) => {
+  const rows = await Promise.all(repos.map(async (repo) => {
     const fileName = repo.full_name.replace("/", "_") + ".zon";
     const filePath = `./.build-zig-files/${fileName}`;
     const url =
       `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/build.zig.zon`;
-    const response = await fetch(url);
-    const zon = await response.text();
-    await Deno.writeTextFile(filePath, zon);
 
-    const insertQuery = `
-      INSERT OR REPLACE INTO zig_build_files (
-        repo_full_name, build_zig_zon_exists, build_zig_zon_fetched_at
-      ) VALUES (
-        ?, ?, ?
-      )
-    `;
-    const stmt = db.prepare(insertQuery);
-    const upsert = db.transaction((data) => {
-      stmt.run(data);
-    });
-    upsert([repo.full_name, true, Math.floor(Date.now() / 1000)]);
+    const response = await fetch(url);
+    if (response.status === 404) {
+      logger.log(
+        "info",
+        `build.zig.zon fetch - status 404 - ${repo.full_name}`,
+      );
+      return {
+        repo_full_name: repo.full_name,
+        build_zig_zon_exists: false,
+        build_zig_zon_fetched_at: Math.floor(Date.now() / 1000),
+      };
+    }
+    if (response.status === 200) {
+      logger.log(
+        "info",
+        `build.zig.zon fetch - status 200 - ${repo.full_name}`,
+      );
+      await Deno.writeTextFile(filePath, await response.text());
+      return {
+        repo_full_name: repo.full_name,
+        build_zig_zon_exists: true,
+        build_zig_zon_fetched_at: Math.floor(Date.now() / 1000),
+      };
+    }
+
+    logger.log(
+      "info",
+      `build.zig.zon fetch - status ${response.status} - ${repo.full_name}`,
+    );
   }));
-}, SECONDLY * 5);
+
+  const stmt = db.prepare(`
+  INSERT OR REPLACE INTO zig_build_files (
+    repo_full_name, build_zig_zon_exists, build_zig_zon_fetched_at
+  ) VALUES (?, ?, ?)
+`);
+
+  try {
+    const upsertMany = db.transaction((data) => {
+      for (const row of data) {
+        stmt.run(
+          row.repo_full_name,
+          row.build_zig_zon_exists,
+          row.build_zig_zon_fetched_at,
+        );
+      }
+    });
+
+    upsertMany(rows);
+    logger.log(
+      "info",
+      `zig_build_files batch insert - len ${rows.length}`,
+    );
+  } catch (error) {
+    logger.log(
+      "error",
+      `zig_build_files batch insert - ${error}`,
+    );
+  } finally {
+    stmt.finalize();
+  }
+}, MINUTELY);
+
+setInterval(() => {
+  logger.flush();
+}, 10000);
