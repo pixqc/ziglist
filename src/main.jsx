@@ -112,15 +112,14 @@ function zon2json(zon) {
 }
 
 /**
- * TODO: deps hash should be the pk btw, not the name
- *
- * Initializes the SQLite database.
+ * initializes the SQLite database.
  *
  * @returns {void}
  */
 const initDatabase = () => {
-  db.exec(`PRAGMA journal_mode = WAL`);
   db.exec(`
+    pragma journal_mode = wal;
+
     create table if not exists zigrepos (
       full_name text primary key,
       name text,
@@ -134,52 +133,69 @@ const initDatabase = () => {
       stars integer,
       forks integer,
       default_branch text,
-      html_url text,
-      language text,
+      language text
+    );
 
+    create table if not exists zig_build_files (
+      repo_full_name text primary key,
       build_zig_exists boolean null,
       build_zig_fetched_at integer null,
       build_zig_zon_exists boolean null,
-      build_zig_zon_fetched_at integer null
-    )`);
-  db.exec(`
+      build_zig_zon_fetched_at integer null,
+      foreign key (repo_full_name) references zigrepos (full_name)
+    );
+
+    create table if not exists url_dependencies (
+      hash text primary key,
+      name text not null,
+      url text not null
+    );
+
     create table if not exists dependencies (
       id integer primary key autoincrement,
-      repo_full_name text,
-      depends_on text,
+      repo_full_name text not null,
+      name text not null,
+      dependency_type text check(dependency_type in ('url', 'path')) not null,
+      path text,
+      url_dependency_hash text,
       foreign key (repo_full_name) references zigrepos (full_name),
-      foreign key (depends_on) references zigrepos (full_name)
-    )`);
+      foreign key (url_dependency_hash) references url_dependencies (hash)
+    );`);
 };
 
-const dependenciesMap = [
-  { fullName: "zigzap/zap", dependencies: ["facil.io"] },
-  {
-    fullName: "oven-sh/bun",
-    dependencies: [
-      "boringssl",
-      "brotli",
-      "c-ares",
-      "diffz",
-      "libarchive",
-      "lol-html",
-      "ls-hpack",
-      "mimalloc",
-      "patches",
-      "picohttpparser",
-      "tinycc",
-      "zig-clap",
-      "zig",
-      "zlib",
-      "zstd",
-    ],
-  },
-  {
-    fullName: "buzz-language/buzz",
-    dependencies: ["linenoise", "mimalloc", "mir", "pcre2"],
-  },
-  { fullName: "orhun/linuxwave", dependencies: ["zig-clap"] },
-];
+const insertDependencies = () => {
+  db.exec(`
+    insert into dependencies (repo_full_name, name, dependency_type, path)
+    values ('zigzap/zap', 'facil.io', 'path', 'facil.io');
+
+    insert into dependencies (repo_full_name, name, dependency_type, path)
+    values
+      ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
+      ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
+      ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
+      ('oven-sh/bun', 'diffz', 'path', 'src/deps/diffz'),
+      ('oven-sh/bun', 'libarchive', 'path', 'src/deps/libarchive'),
+      ('oven-sh/bun', 'lol-html', 'path', 'src/deps/lol-html'),
+      ('oven-sh/bun', 'ls-hpack', 'path', 'src/deps/ls-hpack'),
+      ('oven-sh/bun', 'mimalloc', 'path', 'src/deps/mimalloc'),
+      ('oven-sh/bun', 'patches', 'path', 'src/deps/patches'),
+      ('oven-sh/bun', 'picohttpparser', 'path', 'src/deps/picohttpparser'),
+      ('oven-sh/bun', 'tinycc', 'path', 'src/deps/tinycc'),
+      ('oven-sh/bun', 'zig-clap', 'path', 'src/deps/zig-clap'),
+      ('oven-sh/bun', 'zig', 'path', 'src/deps/zig'),
+      ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
+      ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd');
+
+    insert into dependencies (repo_full_name, name, dependency_type, path)
+    values
+      ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
+      ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
+      ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
+      ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2');
+
+    insert into dependencies (repo_full_name, name, dependency_type, path)
+    values ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
+};
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -679,7 +695,6 @@ const SchemaRepo = z.object({
     login: z.string(),
   }),
   description: z.string().nullish(),
-  html_url: z.string(),
   language: z.string().nullish(),
   stargazers_count: z.number(),
   forks_count: z.number(),
