@@ -70,25 +70,6 @@ const fatal = (message, data) => {
 };
 
 /**
- * Extracts data from a build.zig.zon file.
- * TODO: untested
- *
- * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
- *
- * @param {string} zon - The contents of the zon file.
- */
-function zon2json(zon) {
-  return zon
-    .replace(/(?<!:)\/\/.*$/gm, "")
-    .replace(/\.\{""}/g, ".{}")
-    .replace(/.{/g, "{")
-    .replace(/.@"(\w+(?:-\w+)*)"?\s*=\s*/g, '"$1": ')
-    .replace(/.(\w+)\s*=\s*/g, '"$1": ')
-    .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]")
-    .replace(/,(\s*[}\]])/g, "$1");
-}
-
-/**
  * initializes the SQLite database.
  *
  * @returns {void}
@@ -854,7 +835,7 @@ setInterval(async () => {
 
   logger.log(
     "info",
-    `build.zig.zon fetch - fetching for ${repos.length} zon files`,
+    `build.zig.zon fetch - fetching ${repos.length} zon files`,
   );
 
   const rows = await Promise.all(repos.map(async (repo) => {
@@ -895,10 +876,9 @@ setInterval(async () => {
   }));
 
   const stmt = db.prepare(`
-  INSERT OR REPLACE INTO zig_build_files (
-    repo_full_name, build_zig_zon_exists, build_zig_zon_fetched_at
-  ) VALUES (?, ?, ?)
-`);
+    INSERT OR REPLACE INTO zig_build_files (
+      repo_full_name, build_zig_zon_exists, build_zig_zon_fetched_at
+    ) VALUES (?, ?, ?)`);
 
   try {
     const upsertMany = db.transaction((data) => {
@@ -925,6 +905,28 @@ setInterval(async () => {
     stmt.finalize();
   }
 }, MINUTELY);
+
+/**
+ * Extracts data from a build.zig.zon file.
+ *
+ * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
+ *
+ * @param {string} zon - The contents of the zon file.
+ */
+function zon2json(zon) {
+  return zon
+    .replace(/(?<!:)\/\/.*$/gm, "") // Remove comments
+    .replace(/\.\{""}/g, ".{}") // Handle empty objects
+    .replace(/\.{/g, "{") // Replace leading dots before curly braces
+    .replace(/\.@"([^"]+)"?\s*=\s*/g, '"$1": ') // Handle .@"key" = value
+    .replace(/\.(\w+)\s*=\s*/g, '"$1": ') // Handle .key = value
+    .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]") // Convert paths to array
+    .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+    .replace(/"url"\s*:\s*"([^"]+)"/g, function (_, p1) {
+      // Special handling for URL to preserve '?' and '#'
+      return `"url": "${p1.replace(/"/g, '\\"')}"`;
+    });
+}
 
 setInterval(() => {
   logger.flush();
