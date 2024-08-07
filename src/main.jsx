@@ -208,13 +208,7 @@ healthcheckDatabase();
 healthcheckTailwind();
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-const ENABLE_ZIG_REPO_FETCH =
-  Deno.env.get("ENABLE_ZIG_REPO_FETCH") !== undefined;
 logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
-logger.log(
-  "info",
-  `zig_repo_fetch is ${ENABLE_ZIG_REPO_FETCH ? "enabled" : "disabled"}`,
-);
 
 // ----------------------------------------------------------------------------
 // jsx components
@@ -742,7 +736,7 @@ const a = setInterval(() => {
   const encodedQuery = encodeURIComponent(query);
   const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
   workerRepoFetch.enqueue(url);
-}, SECONDLY * 5);
+}, MINUTELY);
 
 // fetch all zig-related repos to the beginning of time
 const b = setInterval(() => {
@@ -761,11 +755,8 @@ const b = setInterval(() => {
   workerRepoFetch.enqueue(url);
 }, MINUTELY);
 
-// temporarily disable for testing other stuff
-if (!IS_PROD && !ENABLE_ZIG_REPO_FETCH) {
-  clearInterval(a);
-  clearInterval(b);
-}
+clearInterval(a);
+clearInterval(b);
 
 // repo search rate limit: 10 pages per minute
 workerRepoFetch.listenQueue(async (url) => {
@@ -877,7 +868,7 @@ setInterval(async () => {
     SELECT full_name, default_branch
     FROM zig_build_files
     WHERE build_zig_zon_fetched_at IS NULL
-    LIMIT 3;
+    LIMIT 83;
   `);
   const repos = query.all();
   query.finalize();
@@ -921,7 +912,8 @@ setInterval(async () => {
         "info",
         `build.zig.zon fetch - status ${response.status} - ${repo.full_name}`,
       );
-      return undefined;
+      // not returning undefined bc typescript yells at me
+      return { full_name: undefined };
     }
   }));
 
@@ -937,39 +929,43 @@ setInterval(async () => {
       full_name, name, dependency_type, path, url_dependency_hash
     ) VALUES (?, ?, ?, ?, ?)`);
 
+  // need cron hourly healthcheck (log error if faulty) to check
+  // whether these dependencies are correct
+  let zigBuildFilesCount = 0;
+  let urlDependenciesCount = 0;
+  let zigRepoDependenciesCount = 0;
   try {
     db.transaction(() => {
-      for (const zon of zons.filter(Boolean)) {
-        // Insert into zig_build_files
+      for (const zon of zons.filter((zon) => zon.full_name !== undefined)) {
         stmt1.run(
           zon.full_name,
           zon.default_branch,
           zon.parsed !== undefined,
           zon.fetchedAt,
         );
+        zigBuildFilesCount++;
 
         if (zon.parsed && zon.parsed.dependencies) {
           for (const [name, dep] of Object.entries(zon.parsed.dependencies)) {
             if ("url" in dep) {
-              // Insert into url_dependencies
               stmt2.run(dep.hash, name, dep.url);
-
-              // Insert into zig_repo_dependencies
               stmt3.run(zon.full_name, name, "url", null, dep.hash);
+              urlDependenciesCount++;
+              zigRepoDependenciesCount++;
             } else if ("path" in dep) {
-              // Insert into zig_repo_dependencies
               stmt3.run(zon.full_name, name, "path", dep.path, null);
+              zigRepoDependenciesCount++;
             }
           }
         }
       }
     })();
 
+    logger.log("info", `zig_build_files inserted: ${zigBuildFilesCount}`);
+    logger.log("info", `url_dependencies inserted: ${urlDependenciesCount}`);
     logger.log(
       "info",
-      `zig_build_files, url_dependencies, and zig_repo_dependencies inserted - count: ${
-        zons.filter(Boolean).length
-      }`,
+      `zig_repo_dependencies inserted: ${zigRepoDependenciesCount}`,
     );
   } catch (error) {
     logger.log(
@@ -981,7 +977,7 @@ setInterval(async () => {
     stmt2.finalize();
     stmt3.finalize();
   }
-}, SECONDLY * 5);
+}, SECONDLY * 10);
 
 /**
  * Extracts data from a build.zig.zon file.
