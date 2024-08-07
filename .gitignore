@@ -6,3 +6,4 @@ db.sqlite-wal
 indexer-queue.txt
 tailwind.css
 log.txt
+.build-zig-files/
