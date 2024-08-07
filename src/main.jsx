@@ -50,7 +50,6 @@ const createLogger = () => {
 
 const logger = createLogger();
 const db = new Database("db.sqlite");
-const workerRepoFetch = await Deno.openKv(":memory:");
 
 /**
  * Crashes the program with an error message.
@@ -68,29 +67,6 @@ const fatal = (message, data) => {
     Deno.exit(1);
   });
 };
-
-/**
- * Creates repo search URL for the given date range and page on GitHub.
- * https://docs.github.com/en/search-github/searching-on-github/searching-for-repositories
- *
- * @param {Date} start
- * @param {Date} end
- * @param {number} page
- * @returns {string}
- */
-const makeReposURL = (start, end, page) => {
-  const base = "https://api.github.com/search/repositories";
-  const dateRange = `${start.toISOString().slice(0, 19)}Z..${
-    end.toISOString().slice(0, 19)
-  }Z`;
-  // const query = `language:zig`;
-  const query = `in:name,description,topics zig created:${dateRange}`;
-  const encodedQuery = encodeURIComponent(query);
-  return `${base}?q=${encodedQuery}&per_page=100&page=${page}`;
-};
-
-const makeZonURL = ([repo, branch]) =>
-  `https://raw.githubusercontent.com/${repo}/${branch}/build.zig.zon`;
 
 /**
  * Extracts data from a build.zig.zon file.
@@ -118,58 +94,54 @@ function zon2json(zon) {
  */
 const initDatabase = () => {
   db.exec(`
-    pragma journal_mode = wal;
-
-    create table if not exists zigrepos (
-      full_name text primary key,
-      name text,
-      owner text,
-      description text null,
-      homepage text null,
-      license text null,
-      created_at integer,
-      updated_at integer,
-      pushed_at integer,
-      stars integer,
-      forks integer,
-      default_branch text,
-      language text
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS zigrepos (
+      full_name TEXT PRIMARY KEY,
+      name TEXT,
+      owner TEXT,
+      description TEXT NULL,
+      homepage TEXT NULL,
+      license TEXT NULL,
+      created_at INTEGER,
+      updated_at INTEGER,
+      pushed_at INTEGER,
+      stars INTEGER,
+      forks INTEGER,
+      default_branch TEXT,
+      language TEXT
     );
-
-    create table if not exists zig_build_files (
-      repo_full_name text primary key,
-      build_zig_exists boolean null,
-      build_zig_fetched_at integer null,
-      build_zig_zon_exists boolean null,
-      build_zig_zon_fetched_at integer null,
-      foreign key (repo_full_name) references zigrepos (full_name)
+    CREATE TABLE IF NOT EXISTS zig_build_files (
+      repo_full_name TEXT PRIMARY KEY,
+      build_zig_exists BOOLEAN NULL,
+      build_zig_fetched_at INTEGER NULL,
+      build_zig_zon_exists BOOLEAN NULL,
+      build_zig_zon_fetched_at INTEGER NULL,
+      FOREIGN KEY (repo_full_name) REFERENCES zigrepos (full_name)
     );
-
-    create table if not exists url_dependencies (
-      hash text primary key,
-      name text not null,
-      url text not null
+    CREATE TABLE IF NOT EXISTS url_dependencies (
+      hash TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL
     );
-
-    create table if not exists dependencies (
-      id integer primary key autoincrement,
-      repo_full_name text not null,
-      name text not null,
-      dependency_type text check(dependency_type in ('url', 'path')) not null,
-      path text,
-      url_dependency_hash text,
-      foreign key (repo_full_name) references zigrepos (full_name),
-      foreign key (url_dependency_hash) references url_dependencies (hash)
+    CREATE TABLE IF NOT EXISTS dependencies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo_full_name TEXT NOT NULL,
+      name TEXT NOT NULL,
+      dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
+      path TEXT,
+      url_dependency_hash TEXT,
+      FOREIGN KEY (repo_full_name) REFERENCES zigrepos (full_name),
+      FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash)
     );`);
 };
 
 const insertDependencies = () => {
   db.exec(`
-    insert into dependencies (repo_full_name, name, dependency_type, path)
-    values ('zigzap/zap', 'facil.io', 'path', 'facil.io');
+    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    VALUES ('zigzap/zap', 'facil.io', 'path', 'facil.io');
 
-    insert into dependencies (repo_full_name, name, dependency_type, path)
-    values
+    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    VALUES
       ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
       ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
       ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
@@ -186,15 +158,15 @@ const insertDependencies = () => {
       ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
       ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd');
 
-    insert into dependencies (repo_full_name, name, dependency_type, path)
-    values
+    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    VALUES
       ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
       ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
       ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
       ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2');
 
-    insert into dependencies (repo_full_name, name, dependency_type, path)
-    values ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
+    INSERT INTO dependencies (repo_full_name, name, dependency_type, path)
+    VALUES ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
 };
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
@@ -226,13 +198,13 @@ const healthcheckDatabase = () => {
   }
 };
 
-const healthcheckRepoFetch = async () => {
-  const now = new Date();
-  const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const url = makeReposURL(start, now, 1);
-  await workerRepoFetch.enqueue(url);
-  // TODO: fatal this if things go wrong
-};
+// const healthcheckRepoFetch = async () => {
+//   const now = new Date();
+//   const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+//   const url = makeReposURL(start, now, 1);
+//   await workerRepoFetch.enqueue(url);
+//   // TODO: fatal this if things go wrong
+// };
 
 let tailwindcss = "";
 const healthcheckTailwind = () => {
@@ -248,10 +220,12 @@ initDatabase();
 // should crash if any of the healthchecks fail
 healthcheckGithub();
 healthcheckDatabase();
-healthcheckRepoFetch();
+// healthcheckRepoFetch();
 healthcheckTailwind();
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
+const ENABLE_REPO_FETCH = Deno.env.get("ENABLE_REPO_FETCH") !== undefined;
+const ENABLE_FILES_FETCH = Deno.env.get("ENABLE_FILES_FETCH") !== undefined;
 logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 // ----------------------------------------------------------------------------
@@ -722,3 +696,185 @@ const SchemaRepo = z.object({
   homepage: homepage || null,
   ...rest,
 }));
+
+// ----------------------------------------------------------------------------
+// workers
+
+const SECONDLY = 1000;
+const MINUTELY = 60 * 1000;
+const HOURLY = 60 * MINUTELY;
+const DAILY = 24 * HOURLY;
+
+/**
+ * Creates a date range string for GitHub search API.
+ *
+ * @param {Date} start
+ * @param {Date} end
+ * @returns {string}
+ */
+const makeDateRange = (start, end) =>
+  `${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
+
+const workerRepoFetch = await Deno.openKv(":memory:");
+
+// new stuff released last hour
+setInterval(() => {
+  const base = "https://api.github.com/search/repositories";
+  const end = new Date();
+  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+  const dateRange = makeDateRange(start, end);
+  const query = `in:name,description,topics zig created:${dateRange}`;
+  const encodedQuery = encodeURIComponent(query);
+  const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
+  workerRepoFetch.enqueue(url);
+}, HOURLY);
+
+// top repos
+const a = setInterval(() => {
+  const base = "https://api.github.com/search/repositories";
+  const query = `language:zig`;
+  const encodedQuery = encodeURIComponent(query);
+  const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
+  console.log("abcd");
+  workerRepoFetch.enqueue(url);
+}, MINUTELY);
+
+// fetch all zig-related repos to the beginning of time
+const b = setInterval(() => {
+  const base = "https://api.github.com/search/repositories";
+  const res = db.prepare("SELECT MIN(created_at) FROM zigrepos").get();
+  const minCreatedAt = res && "MIN(created_at)" in res
+    ? res["MIN(created_at)"]
+    : null;
+  const end = minCreatedAt ? new Date(Number(minCreatedAt) * 1000) : new Date();
+  const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const dateRange = makeDateRange(start, end);
+  const query = `in:name,description,topics zig created:${dateRange}`;
+  const encodedQuery = encodeURIComponent(query);
+  const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
+  console.log("abcd");
+  workerRepoFetch.enqueue(url);
+}, SECONDLY * 5);
+
+// temporarily disable for testing other stuff
+clearInterval(a);
+clearInterval(b);
+
+workerRepoFetch.listenQueue(async (url) => {
+  const response = await fetch(url, { headers: githubHeaders });
+  if (response.status === 403) {
+    logger.log("info", `repo fetch - status 403 - ${url}`);
+
+    const rateLimit = {
+      limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
+      remaining: parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
+      reset: parseInt(response.headers.get("x-ratelimit-reset") || "0"),
+    };
+
+    const now = Math.floor(Date.now() / 1000);
+    const delaySeconds = Math.max(0, rateLimit.reset - now);
+    const delayMs = delaySeconds * 1000;
+
+    logger.log(
+      "info",
+      `repo fetch - retrying in ${delaySeconds} seconds - ${url}`,
+    );
+    workerRepoFetch.enqueue(url, { delay: delayMs });
+    return;
+  }
+
+  // github returns next page in link header
+  const linkHeader = response.headers.get("link");
+  if (linkHeader) {
+    const nextLink = linkHeader.split(",").find((part) =>
+      part.includes('rel="next"')
+    );
+    const next = nextLink?.match(/<(.*)>/)?.[1];
+    if (next !== undefined) workerRepoFetch.enqueue(next, { delay: 1000 });
+  }
+
+  const data = await response.json();
+  const items = data.items.filter(Boolean);
+  logger.log("info", `repo fetch - status 200 - len ${items.length} - ${url}`);
+  const parsed = items.map(SchemaRepo.parse);
+
+  const insertQuery = `
+    INSERT OR REPLACE INTO zigrepos (
+      full_name, name, owner, description, homepage, license, created_at,
+      updated_at, pushed_at, stars, forks, default_branch, language
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `;
+  const stmt = db.prepare(insertQuery);
+  const upsertMany = db.transaction((data) => {
+    for (const row of data) {
+      stmt.run(row);
+    }
+  });
+
+  try {
+    const rows = parsed.map((item) => [
+      item.full_name,
+      item.name,
+      item.owner,
+      item.description,
+      item.homepage,
+      item.license,
+      item.created_at,
+      item.updated_at,
+      item.pushed_at,
+      item.stars,
+      item.forks,
+      item.default_branch,
+      item.language,
+    ]);
+
+    upsertMany(rows);
+    logger.log("info", `repo bulk insert - len ${rows.length}`);
+  } catch (error) {
+    logger.log("error", `repo bulk insert - ${error}`);
+  } finally {
+    stmt.finalize();
+  }
+});
+
+// WIP
+setInterval(async () => {
+  const query = db.prepare(`
+    SELECT zr.full_name, zr.default_branch
+    FROM zigrepos zr
+    LEFT JOIN zig_build_files zbf ON zr.full_name = zbf.repo_full_name
+    WHERE zbf.build_zig_zon_fetched_at IS NULL
+    ORDER BY zr.stars DESC
+    LIMIT 3;
+  `);
+  const repos = query.all();
+  query.finalize();
+  console.log(repos);
+
+  let transactions = [];
+
+  Promise.all(repos.map(async (repo) => {
+    const fileName = repo.full_name.replace("/", "_") + ".zon";
+    const filePath = `./.build-zig-files/${fileName}`;
+    const url =
+      `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/build.zig.zon`;
+    const response = await fetch(url);
+    const zon = await response.text();
+    await Deno.writeTextFile(filePath, zon);
+
+    const insertQuery = `
+      INSERT OR REPLACE INTO zig_build_files (
+        repo_full_name, build_zig_zon_exists, build_zig_zon_fetched_at
+      ) VALUES (
+        ?, ?, ?
+      )
+    `;
+    const stmt = db.prepare(insertQuery);
+    const upsert = db.transaction((data) => {
+      stmt.run(data);
+    });
+    upsert([repo.full_name, true, Math.floor(Date.now() / 1000)]);
+  }));
+}, SECONDLY * 5);
