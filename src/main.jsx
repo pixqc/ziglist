@@ -831,8 +831,6 @@ setInterval(() => {
   workerRepoFetch.enqueue(url);
 }, HOURLY);
 
-// FIXME: both these crons are clashing
-
 // fetch all zig-related repos to the beginning of time
 const zigReposInterval = setInterval(() => {
   const zigInitDate = new Date("2015-07-04");
@@ -899,7 +897,18 @@ workerRepoFetch.listenQueue(async (url) => {
 
   const data = await response.json();
   const items = data.items.filter(Boolean);
-  const parsed = items.map(SchemaRepo.parse);
+  const parsed = [];
+  for (const item of items) {
+    try {
+      const parsedItem = SchemaRepo.parse(item);
+      parsed.push(parsedItem);
+    } catch (e) {
+      logger.error("error parsing repos", {
+        fullName: item.full_name,
+        error: e,
+      });
+    }
+  }
 
   const stmt = db.prepare(`
     INSERT OR REPLACE INTO zig_repos (
@@ -953,7 +962,6 @@ workerRepoFetch.listenQueue(async (url) => {
     });
 
     const rows = parsed.map((item) => [item.full_name, item.default_branch]);
-
     upsertMany(rows);
     logger.info(`zig_build_files bulk insert - len ${rows.length}`);
   } catch (error) {
@@ -1007,7 +1015,10 @@ setInterval(async () => {
         const content = JSON.parse(zon2json(contentRaw));
         parsed = SchemaZon.parse(content);
       } catch (e) {
-        logger.error(`error parsing zon file: ${e}`, contentRaw);
+        logger.error(`error parsing zon file:`, {
+          fullName: repo.full_name,
+          error: e,
+        });
       }
     }
     // TODO: handle 403 later
