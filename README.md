@@ -2,7 +2,7 @@
 
 Ziglist is a web-based tool to discover Zig projects and packages. Visit [ziglist.org](https://ziglist.org).
 
-How it works: Ziglist periodically indexes GitHub for Zig-related repositories, saves it in a SQLite database, and serves it. Ziglist lives in a single JavaScript [./src/main.jsx](file). It runs on the Deno runtime.
+How it works: Ziglist periodically indexes GitHub for Zig-related repositories, saves it in a SQLite database, and serves it. Ziglist lives in a single JavaScript [file](./src/main.jsx). It runs on the Deno runtime.
 
 To run Ziglist locally:
 
