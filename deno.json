@@ -10,11 +10,12 @@
   },
   "unstable": ["ffi", "kv", "cron"],
   "imports": {
+    "s3": "jsr:@bradenmacdonald/s3-lite-client@^0.7.6",
     "@std/dotenv/load": "jsr:@std/dotenv/load",
-    "zod": "https://deno.land/x/zod@v3.16.1/mod.ts",
-    "sqlite": "jsr:@db/sqlite@^0.11.1",
+    "@std/fs": "jsr:@std/fs",
     "hono": "jsr:@hono/hono@^4.5.1",
-    "@std/fs": "jsr:@std/fs"
+    "sqlite": "jsr:@db/sqlite@^0.11.1",
+    "zod": "https://deno.land/x/zod@v3.16.1/mod.ts"
   },
   "compilerOptions": {
     "jsx": "precompile",
