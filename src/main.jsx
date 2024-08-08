@@ -9,7 +9,7 @@ import { ensureDirSync } from "@std/fs";
 
 /**
  * Creates a logger object with log and flush methods.
- * @typedef {('info' | 'error' | 'warn' | 'debug' | 'fatal')} LogLevel
+ * @typedef {('debug' | 'info' | 'error' | 'warn' | 'fatal')} LogLevel
  *
  * @returns {{
  *   log: (level: LogLevel, message: string, data?: any) => void,
@@ -643,7 +643,6 @@ Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
 // schemas
-
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -729,14 +728,7 @@ setInterval(() => {
   workerRepoFetch.enqueue(url);
 }, HOURLY);
 
-// top repos
-const a = setInterval(() => {
-  const base = "https://api.github.com/search/repositories";
-  const query = `language:zig`;
-  const encodedQuery = encodeURIComponent(query);
-  const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
-  workerRepoFetch.enqueue(url);
-}, MINUTELY);
+// FIXME: both these crons are clashing
 
 // fetch all zig-related repos to the beginning of time
 const b = setInterval(() => {
@@ -755,14 +747,20 @@ const b = setInterval(() => {
   workerRepoFetch.enqueue(url);
 }, MINUTELY);
 
-clearInterval(a);
 clearInterval(b);
+
+// no need to cron this, this fetches 10 pages of popular zig repos
+const base = "https://api.github.com/search/repositories";
+const query = `language:zig`;
+const encodedQuery = encodeURIComponent(query);
+const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
+workerRepoFetch.enqueue(url);
 
 // repo search rate limit: 10 pages per minute
 workerRepoFetch.listenQueue(async (url) => {
   const response = await fetch(url, { headers: githubHeaders });
   if (response.status === 403) {
-    logger.log("info", `zig_repos fetch - status 403 - ${url}`);
+    logger.log("warn", `zig_repos fetch - status 403 - ${url}`);
 
     const rateLimit = {
       limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
@@ -868,7 +866,7 @@ setInterval(async () => {
     SELECT full_name, default_branch
     FROM zig_build_files
     WHERE build_zig_zon_fetched_at IS NULL
-    LIMIT 83;
+    LIMIT 13;
   `);
   const repos = query.all();
   query.finalize();
@@ -877,45 +875,48 @@ setInterval(async () => {
     `zig_build_files fetch - fetching ${repos.length} zon files`,
   );
 
-  const zons = await Promise.all(repos.map(async (repo) => {
+  /**
+   * @param {{ full_name: string, default_branch: string }} repo
+   * @returns {Promise<{
+   *   status: number,
+   *   fetchedAt: number,
+   *   fullName: string,
+   *   defaultBranch: string,
+   *   parsed?: z.infer<typeof SchemaZon>
+   * }>}
+   */
+  const fetchZon = async (repo) => {
     const url =
       `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/build.zig.zon`;
     const response = await fetch(url);
     const fetchedAt = Math.floor(Date.now() / 1000);
+    const status = response.status;
 
-    if (response.status === 404) {
-      logger.log(
-        "info",
-        `build.zig.zon fetch - status 404 - ${repo.full_name}`,
-      );
-      return {
-        full_name: repo.full_name,
-        default_branch: repo.default_branch,
-        fetchedAt,
-      };
-    } else if (response.status === 200) {
-      logger.log(
-        "info",
-        `build.zig.zon fetch - status 200 - ${repo.full_name}`,
-      );
-      const zonContent = await response.text();
-      const jsonContent = JSON.parse(zon2json(zonContent));
-      const parsed = SchemaZon.parse(jsonContent);
-      return {
-        full_name: repo.full_name,
-        default_branch: repo.default_branch,
-        fetchedAt,
-        parsed,
-      };
-    } else {
-      logger.log(
-        "info",
-        `build.zig.zon fetch - status ${response.status} - ${repo.full_name}`,
-      );
-      // not returning undefined bc typescript yells at me
-      return { full_name: undefined };
+    logger.log(
+      "info",
+      `build.zig.zon fetch - status ${status} - ${repo.full_name}`,
+    );
+
+    let parsed;
+    if (status === 200) {
+      const contentRaw = await response.text();
+      try {
+        const content = JSON.parse(zon2json(contentRaw));
+        parsed = SchemaZon.parse(content);
+      } catch (e) {
+        logger.log("error", `Error parsing zon file: ${e}`, contentRaw);
+      }
     }
-  }));
+    // TODO: handle 403 later
+
+    return {
+      status,
+      fetchedAt,
+      fullName: repo.full_name,
+      defaultBranch: repo.default_branch,
+      parsed,
+    };
+  };
 
   const stmt1 = db.prepare(`
     INSERT OR REPLACE INTO zig_build_files (
@@ -929,18 +930,20 @@ setInterval(async () => {
       full_name, name, dependency_type, path, url_dependency_hash
     ) VALUES (?, ?, ?, ?, ?)`);
 
-  // need cron hourly healthcheck (log error if faulty) to check
-  // whether these dependencies are correct
+  // @ts-ignore repo type is Record<string, any>
+  const zons = await Promise.all(repos.map(fetchZon));
+
   let zigBuildFilesCount = 0;
   let urlDependenciesCount = 0;
   let zigRepoDependenciesCount = 0;
+
   try {
     db.transaction(() => {
-      for (const zon of zons.filter((zon) => zon.full_name !== undefined)) {
+      for (const zon of zons) {
         stmt1.run(
-          zon.full_name,
-          zon.default_branch,
-          zon.parsed !== undefined,
+          zon.fullName,
+          zon.defaultBranch,
+          zon.status === 200,
           zon.fetchedAt,
         );
         zigBuildFilesCount++;
@@ -949,24 +952,23 @@ setInterval(async () => {
           for (const [name, dep] of Object.entries(zon.parsed.dependencies)) {
             if ("url" in dep) {
               stmt2.run(dep.hash, name, dep.url);
-              stmt3.run(zon.full_name, name, "url", null, dep.hash);
+              stmt3.run(zon.fullName, name, "url", null, dep.hash);
               urlDependenciesCount++;
               zigRepoDependenciesCount++;
             } else if ("path" in dep) {
-              stmt3.run(zon.full_name, name, "path", dep.path, null);
+              stmt3.run(zon.fullName, name, "path", dep.path, null);
               zigRepoDependenciesCount++;
             }
           }
         }
       }
+      logger.log("info", `zig_build_files inserted: ${zigBuildFilesCount}`);
+      logger.log("info", `url_dependencies inserted: ${urlDependenciesCount}`);
+      logger.log(
+        "info",
+        `zig_repo_dependencies inserted: ${zigRepoDependenciesCount}`,
+      );
     })();
-
-    logger.log("info", `zig_build_files inserted: ${zigBuildFilesCount}`);
-    logger.log("info", `url_dependencies inserted: ${urlDependenciesCount}`);
-    logger.log(
-      "info",
-      `zig_repo_dependencies inserted: ${zigRepoDependenciesCount}`,
-    );
   } catch (error) {
     logger.log(
       "error",
