@@ -9,7 +9,7 @@ import { S3Client } from "s3";
 // utils
 
 const SECONDLY = 1000;
-const MINUTELY = 60 * 1000;
+const MINUTELY = 60 * SECONDLY;
 const HOURLY = 60 * MINUTELY;
 const DAILY = 24 * HOURLY;
 
