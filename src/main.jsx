@@ -834,7 +834,8 @@ setInterval(() => {
 // FIXME: both these crons are clashing
 
 // fetch all zig-related repos to the beginning of time
-const b = setInterval(() => {
+const zigReposInterval = setInterval(() => {
+  const zigInitDate = new Date("2015-07-04");
   const base = "https://api.github.com/search/repositories";
   const res = db.prepare("SELECT MIN(created_at) FROM zig_repos").get();
   const minCreatedAt = res && "MIN(created_at)" in res
@@ -842,6 +843,15 @@ const b = setInterval(() => {
     : null;
   const end = minCreatedAt ? new Date(Number(minCreatedAt) * 1000) : new Date();
   const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
+  if (end < zigInitDate) {
+    logger.info("zig_repos fetch to end");
+
+    // popular repos, to make sure not missing any
+    const encodedQuery = encodeURIComponent("language:zig");
+    const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
+    workerRepoFetch.enqueue(url);
+    clearInterval(zigReposInterval);
+  }
   // must use date because github's api only return the first 1k items
   const dateRange = makeDateRange(start, end);
   const query = `in:name,description,topics zig created:${dateRange}`;
@@ -849,15 +859,6 @@ const b = setInterval(() => {
   const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
   workerRepoFetch.enqueue(url);
 }, MINUTELY);
-
-// clearInterval(b);
-
-// no need to cron this, this fetches 10 pages of popular zig repos
-const base = "https://api.github.com/search/repositories";
-const query = `language:zig`;
-const encodedQuery = encodeURIComponent(query);
-const url = `${base}?q=${encodedQuery}&per_page=100&page=1`;
-workerRepoFetch.enqueue(url);
 
 // repo search rate limit: 10 pages per minute
 workerRepoFetch.listenQueue(async (url) => {
@@ -964,6 +965,7 @@ workerRepoFetch.listenQueue(async (url) => {
 
 ensureDirSync("./.build-zig-files");
 setInterval(async () => {
+  // rate limit is 5000 per hour, 13 per minute
   const query = db.prepare(`
     SELECT full_name, default_branch
     FROM zig_build_files
