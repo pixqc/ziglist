@@ -81,8 +81,6 @@ const fatal = (message, data) => {
 };
 
 /**
- * initializes the SQLite database.
- *
  * @returns {void}
  */
 const initDatabase = () => {
@@ -127,7 +125,12 @@ const initDatabase = () => {
       url_dependency_hash TEXT,
       FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
       FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash)
-    );`);
+    );
+    CREATE INDEX IF NOT EXISTS idx_zig_repos_pushed_at_stars_forks ON zig_repos(pushed_at DESC, stars, forks);
+    CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
+    CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
+    CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
+`);
 };
 
 const insertDependencies = () => {
