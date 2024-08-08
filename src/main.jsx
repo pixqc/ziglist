@@ -264,25 +264,35 @@ const healthcheckTailwind = () => {
   }
 };
 
-const healthcheckR2 = async () => {
+const healthcheckR2 = () => {
   const timestamp = new Date().toISOString();
   const opts = {
     "metadata": { "Content-Type": "text/plain" },
   };
-  await R2.putObject("test.txt", timestamp, opts);
 
-  const response = await R2.getObject("test.txt");
   let contents = "";
   const writable = new WritableStream({
     write(chunk) {
       contents += new TextDecoder().decode(chunk);
     },
   });
-  await response.body?.pipeTo(writable);
-  if (contents !== timestamp) {
-    fatal("R2 healthcheck failed");
-  }
-  logger.info("R2 healthcheck passed");
+
+  R2.putObject("test.txt", timestamp, opts)
+    .then(() => R2.getObject("test.txt"))
+    .then((response) => {
+      return response.body?.pipeTo(writable)
+        .then(() => contents);
+    })
+    .then((contents) => {
+      if (contents !== timestamp) {
+        fatal("R2 healthcheck failed");
+      } else {
+        logger.info("R2 healthcheck passed");
+      }
+    })
+    .catch((error) => {
+      fatal(`R2 healthcheck failed: ${error}`);
+    });
 };
 
 initDatabase();
