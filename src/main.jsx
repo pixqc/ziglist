@@ -8,38 +8,49 @@ import { ensureDirSync } from "@std/fs";
 // utils
 
 /**
- * Creates a logger object with log and flush methods.
- * @typedef {('debug' | 'info' | 'error' | 'warn' | 'fatal')} LogLevel
+ * Creates a logger object.
+ * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
  *
  * @returns {{
- *   log: (level: LogLevel, message: string, data?: any) => void,
+ *   trace: (message: string, data?: any) => void,
+ *   debug: (message: string, data?: any) => void,
+ *   info: (message: string, data?: any) => void,
+ *   warn: (message: string, data?: any) => void,
+ *   error: (message: string, data?: any) => void,
+ *   fatal: (message: string, data?: any) => void,
  *   flush: () => Promise<void>
- * }} An object with log and flush methods.
+ * }} A logger object with methods for each log level and a flush method.
  */
 const createLogger = () => {
   let buffer = [];
+
+  /**
+   * Logs a message with a log level and optional data.
+   * @param {LogLevel} level - Log level.
+   * @param {string} message - Log message.
+   * @param {any} [data] - Additional data to log (optional).
+   * @returns {void}
+   */
+  const log = (level, message, data) => {
+    const now = new Date().toISOString();
+    const msg = `${now} ${level.toUpperCase()}: ${message}`;
+    if (data !== undefined) {
+      buffer.push(`${msg} ${JSON.stringify(data)}`);
+      console.log(msg, data);
+    } else {
+      buffer.push(msg);
+      console.log(msg);
+    }
+  };
+
   return {
-    /**
-     * Logs a message with optional data.
-     * @param {LogLevel} level - The log level (e.g., 'info', 'error').
-     * @param {string} message - The log message.
-     * @param {*} [data] - Optional data to log.
-     */
-    log(level, message, data) {
-      const now = new Date().toISOString();
-      const msg = `${now} ${level.toUpperCase()}: ${message}`;
-      if (data !== undefined) {
-        buffer.push(`${msg} ${JSON.stringify(data)}`);
-        console.log(msg, data);
-      } else {
-        buffer.push(msg);
-        console.log(msg);
-      }
-    },
-    /**
-     * Flushes the log buffer to a file.
-     * @returns {Promise<void>}
-     */
+    trace: (message, data) => log("trace", message, data),
+    debug: (message, data) => log("debug", message, data),
+    info: (message, data) => log("info", message, data),
+    warn: (message, data) => log("warn", message, data),
+    error: (message, data) => log("error", message, data),
+    fatal: (message, data) => log("fatal", message, data),
+
     async flush() {
       if (buffer.length === 0) return;
       const bufStr = buffer.join("\n") + "\n";
@@ -63,7 +74,7 @@ const db = new Database("db.sqlite");
  * @param {Object} [data] - Additional data to log (optional).
  */
 const fatal = (message, data) => {
-  logger.log("fatal", message, data);
+  logger.fatal(message, data);
   logger.flush().then(() => {
     Deno.exit(1);
   });
@@ -166,7 +177,7 @@ const healthcheckGithub = () => {
     headers: githubHeaders,
   })
     .then(() => {
-      logger.log("info", "GITHUB_API_KEY is valid and usable");
+      logger.info("GITHUB_API_KEY is valid and usable");
     })
     .catch((e) => {
       fatal(`GitHub API key is invalid: ${e}`);
@@ -176,7 +187,7 @@ const healthcheckGithub = () => {
 const healthcheckDatabase = () => {
   try {
     const _ = db.prepare("SELECT COUNT(*) FROM zig_repos").get();
-    logger.log("info", "database is working");
+    logger.info("database is working");
   } catch (e) {
     fatal(e);
   }
@@ -208,7 +219,7 @@ healthcheckDatabase();
 healthcheckTailwind();
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-logger.log("info", `running on ${IS_PROD ? "prod" : "dev"} mode`);
+logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 // ----------------------------------------------------------------------------
 // jsx components
@@ -553,10 +564,7 @@ app.use("*", async (c, next) => {
   const start = Date.now();
   await next();
   const ms = Date.now() - start;
-  logger.log(
-    "info",
-    `${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`,
-  );
+  logger.info(`${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`);
 });
 
 app.get("/", (c) => {
@@ -573,8 +581,7 @@ app.get("/", (c) => {
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  const path = `GET /?page=${page}`;
-  logger.log("info", `${path} - ${repos.length} from db`);
+  logger.info(`GET /?page=${page} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
@@ -595,8 +602,7 @@ app.get("/new", (c) => {
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  const path = `GET /new?page=${page}`;
-  logger.log("info", `${path} - ${repos.length} from db`);
+  logger.info(`GET /new?page=${page} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/new" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/new" page={page} />
@@ -618,8 +624,7 @@ app.get("/top", (c) => {
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
 
-  const path = `GET /top?page=${page}`;
-  logger.log("info", `${path} - ${repos.length} from db`);
+  logger.info(`GET /top?page=${page} - ${repos.length} from db`);
   return c.html(
     <BaseLayout currentPath="/top" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
@@ -638,7 +643,7 @@ app.notFound((c) => {
 });
 
 const port = 8080;
-logger.log("info", `listening on ${port}`);
+logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
@@ -759,9 +764,13 @@ workerRepoFetch.enqueue(url);
 // repo search rate limit: 10 pages per minute
 workerRepoFetch.listenQueue(async (url) => {
   const response = await fetch(url, { headers: githubHeaders });
-  if (response.status === 403) {
-    logger.log("warn", `zig_repos fetch - status 403 - ${url}`);
+  if (response.ok) {
+    logger.info(`zig_repos fetch - ${response.status} - ${url}`);
+  } else {
+    logger.warn(`zig_repos fetch - ${response.status} - ${url}`);
+  }
 
+  if (response.status === 403) {
     const rateLimit = {
       limit: parseInt(response.headers.get("x-ratelimit-limit") || "5000"),
       remaining: parseInt(response.headers.get("x-ratelimit-remaining") || "0"),
@@ -772,8 +781,7 @@ workerRepoFetch.listenQueue(async (url) => {
     const delaySeconds = Math.max(0, rateLimit.reset - now);
     const delayMs = delaySeconds * 1000;
 
-    logger.log(
-      "info",
+    logger.warn(
       `zig_repos fetch - retrying in ${delaySeconds} seconds - ${url}`,
     );
     workerRepoFetch.enqueue(url, { delay: delayMs });
@@ -792,10 +800,6 @@ workerRepoFetch.listenQueue(async (url) => {
 
   const data = await response.json();
   const items = data.items.filter(Boolean);
-  logger.log(
-    "info",
-    `zig_repos fetch - status 200 - len ${items.length} - ${url}`,
-  );
   const parsed = items.map(SchemaRepo.parse);
 
   const stmt = db.prepare(`
@@ -831,9 +835,9 @@ workerRepoFetch.listenQueue(async (url) => {
     ]);
 
     upsertMany(rows);
-    logger.log("info", `zig_repos bulk insert - len ${rows.length}`);
+    logger.info(`zig_repos bulk insert - len ${rows.length}`);
   } catch (error) {
-    logger.log("error", `zig_repos bulk insert - ${error}`);
+    logger.error(`zig_repos bulk insert - ${error}`);
   } finally {
     if (stmt) stmt.finalize();
   }
@@ -852,9 +856,9 @@ workerRepoFetch.listenQueue(async (url) => {
     const rows = parsed.map((item) => [item.full_name, item.default_branch]);
 
     upsertMany(rows);
-    logger.log("info", `zig_build_files bulk insert - len ${rows.length}`);
+    logger.info(`zig_build_files bulk insert - len ${rows.length}`);
   } catch (error) {
-    logger.log("error", `zig_build_files bulk insert - ${error}`);
+    logger.error(`zig_build_files bulk insert - ${error}`);
   } finally {
     if (stmt2) stmt2.finalize();
   }
@@ -870,10 +874,7 @@ setInterval(async () => {
   `);
   const repos = query.all();
   query.finalize();
-  logger.log(
-    "info",
-    `zig_build_files fetch - fetching ${repos.length} zon files`,
-  );
+  logger.info(`zig_build_files fetch - fetching ${repos.length} zon files`);
 
   /**
    * @param {{ full_name: string, default_branch: string }} repo
@@ -892,10 +893,12 @@ setInterval(async () => {
     const fetchedAt = Math.floor(Date.now() / 1000);
     const status = response.status;
 
-    logger.log(
-      "info",
-      `build.zig.zon fetch - status ${status} - ${repo.full_name}`,
-    );
+    // not warning 404 because it's normal
+    if (status === 200 || status === 404) {
+      logger.info(`build.zig.zon fetch - status ${status} - ${repo.full_name}`);
+    } else {
+      logger.warn(`build.zig.zon fetch - status ${status} - ${repo.full_name}`);
+    }
 
     let parsed;
     if (status === 200) {
@@ -904,7 +907,7 @@ setInterval(async () => {
         const content = JSON.parse(zon2json(contentRaw));
         parsed = SchemaZon.parse(content);
       } catch (e) {
-        logger.log("error", `Error parsing zon file: ${e}`, contentRaw);
+        logger.error(`error parsing zon file: ${e}`, contentRaw);
       }
     }
     // TODO: handle 403 later
@@ -933,9 +936,9 @@ setInterval(async () => {
   // @ts-ignore repo type is Record<string, any>
   const zons = await Promise.all(repos.map(fetchZon));
 
-  let zigBuildFilesCount = 0;
-  let urlDependenciesCount = 0;
-  let zigRepoDependenciesCount = 0;
+  let filesCount = 0;
+  let urlDepsCount = 0;
+  let repoDepsCount = 0;
 
   try {
     db.transaction(() => {
@@ -946,34 +949,28 @@ setInterval(async () => {
           zon.status === 200,
           zon.fetchedAt,
         );
-        zigBuildFilesCount++;
+        filesCount++;
 
         if (zon.parsed && zon.parsed.dependencies) {
           for (const [name, dep] of Object.entries(zon.parsed.dependencies)) {
             if ("url" in dep) {
               stmt2.run(dep.hash, name, dep.url);
               stmt3.run(zon.fullName, name, "url", null, dep.hash);
-              urlDependenciesCount++;
-              zigRepoDependenciesCount++;
+              urlDepsCount++;
+              repoDepsCount++;
             } else if ("path" in dep) {
               stmt3.run(zon.fullName, name, "path", dep.path, null);
-              zigRepoDependenciesCount++;
+              repoDepsCount++;
             }
           }
         }
       }
-      logger.log("info", `zig_build_files inserted: ${zigBuildFilesCount}`);
-      logger.log("info", `url_dependencies inserted: ${urlDependenciesCount}`);
-      logger.log(
-        "info",
-        `zig_repo_dependencies inserted: ${zigRepoDependenciesCount}`,
-      );
+      logger.info(`zig_build_files inserted: ${filesCount}`);
+      logger.info(`url_dependencies inserted: ${urlDepsCount}`);
+      logger.info(`zig_repo_dependencies inserted: ${repoDepsCount}`);
     })();
   } catch (error) {
-    logger.log(
-      "error",
-      `Error inserting zig_build_files, url_dependencies, and zig_repo_dependencies: ${error}`,
-    );
+    logger.error(`error inserting zig_build_files: ${error}`);
   } finally {
     stmt1.finalize();
     stmt2.finalize();
@@ -1005,4 +1002,4 @@ function zon2json(zon) {
 
 setInterval(() => {
   logger.flush();
-}, 10000);
+}, SECONDLY * 10);
