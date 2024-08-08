@@ -992,6 +992,7 @@ setInterval(async () => {
   `);
   const repos = query.all();
   query.finalize();
+  if (repos.length === 0) return;
   logger.info(`zig_build_files fetch - fetching ${repos.length} zon files`);
 
   /**
