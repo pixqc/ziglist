@@ -3,6 +3,7 @@ import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
 import { ensureDirSync } from "@std/fs";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "s3";
 
 // ----------------------------------------------------------------------------
 // utils
@@ -133,6 +134,8 @@ const initDatabase = () => {
 `);
 };
 
+// zfl9/chinadns-ng: wolfssl, mimalloc
+//cztomsik/graffiti: emlay, glfw, nanovg-zig, napigen
 const insertDependencies = () => {
   db.exec(`
     INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
@@ -167,6 +170,9 @@ const insertDependencies = () => {
     VALUES ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
 };
 
+const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
+logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
+
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
 const githubHeaders = {
@@ -174,6 +180,24 @@ const githubHeaders = {
   "X-GitHub-Api-Version": "2022-11-28",
   Authorization: `Bearer ${GITHUB_API_KEY}`,
 };
+
+const R2_ENDPOINT = z.string().parse(Deno.env.get("R2_ENDPOINT"));
+const R2_ACCESS_KEY_ID = z.string().parse(Deno.env.get("R2_ACCESS_KEY_ID"));
+const R2_SECRET_ACCESS_KEY = z.string().parse(
+  Deno.env.get("R2_SECRET_ACCESS_KEY"),
+);
+if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
+  fatal("R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY are not set");
+}
+
+const R2 = new S3Client({
+  region: "auto",
+  endpoint: R2_ENDPOINT,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
+});
 
 const healthcheckGithub = () => {
   fetch("https://api.github.com/zen", {
@@ -196,13 +220,24 @@ const healthcheckDatabase = () => {
   }
 };
 
-// const healthcheckRepoFetch = async () => {
-//   const now = new Date();
-//   const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-//   const url = makeReposURL(start, now, 1);
-//   await workerRepoFetch.enqueue(url);
-//   // TODO: fatal this if things go wrong
-// };
+const healthcheckGithubFetch = async () => {
+  const base = "https://api.github.com/search/repositories";
+  const query = `language:zig`;
+  const encodedQuery = encodeURIComponent(query);
+  const url = `${base}?q=${encodedQuery}&per_page=2&page=1`;
+  const response = await fetch(url, { headers: githubHeaders });
+  if (response.ok) {
+    logger.info(`zig_repos fetch - ${response.status} - ${url}`);
+  }
+  const url2 =
+    "https://raw.githubusercontent.com/mitchellh/libxev/main/build.zig.zon";
+  const response2 = await fetch(url2);
+  if (response2.ok) {
+    logger.info(`zig_repos fetch - ${response2.status} - ${url2}`);
+  }
+
+  // parse both
+};
 
 let tailwindcss = "";
 const healthcheckTailwind = () => {
@@ -213,16 +248,38 @@ const healthcheckTailwind = () => {
   }
 };
 
+const healthcheckR2 = async () => {
+  const timestamp = new Date().toISOString();
+  const params = {
+    Bucket: "ziglist-backups",
+    Key: "dummy.txt",
+    Body: timestamp,
+    ContentType: "text/plain",
+  };
+  try {
+    const data = await R2.send(new PutObjectCommand(params));
+    console.log(data);
+  } catch (err) {
+    console.log(err);
+  }
+
+  const getObjectParams = {
+    Bucket: "ziglist-backups",
+    Key: "dummy.txt",
+  };
+  const { Body } = await R2.send(new GetObjectCommand(getObjectParams));
+  const text = await Body.transformToString();
+  console.log(text);
+};
+
 initDatabase();
 
 // should crash if any of the healthchecks fail
 healthcheckGithub();
 healthcheckDatabase();
-// healthcheckRepoFetch();
+// healthcheckGithubFetch();
+healthcheckR2();
 healthcheckTailwind();
-
-const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 // ----------------------------------------------------------------------------
 // jsx components
@@ -1036,3 +1093,51 @@ function zon2json(zon) {
 setInterval(() => {
   logger.flush();
 }, SECONDLY * 10);
+
+// ----------------------------------------------------------------------------
+// backup db and log.txt
+
+setInterval(async () => {
+  const timestamp = new Date().toISOString();
+  try {
+    const backupDB = new Database("./backup.sqlite");
+    db.backup(backupDB);
+    backupDB.close();
+    Deno.copyFile("./log.txt", "./log-backup.txt");
+    logger.info("backed up db and log.txt locally");
+  } catch (e) {
+    logger.error(`error backing up db and log.txt: ${e}`);
+  }
+
+  try {
+    await Promise.all([
+      R2.send(
+        new PutObjectCommand({
+          Bucket: "ziglist-backups",
+          Key: `backup-${timestamp}.sqlite`,
+          Body: await Deno.readFile("./backup.sqlite"),
+          ContentType: "application/x-sqlite3",
+        }),
+      ),
+      R2.send(
+        new PutObjectCommand({
+          Bucket: "ziglist-backups",
+          Key: `log-${timestamp}.txt`,
+          Body: await Deno.readFile("./log-backup.txt"),
+          ContentType: "text/plain",
+        }),
+      ),
+    ]);
+    logger.info("backed up db and log.txt to R2");
+  } catch (e) {
+    logger.error(`error backing up db and log.txt to R2: ${e}`);
+  }
+
+  try {
+    await Deno.remove("./backup.db");
+    await Deno.remove("./log-backup.txt");
+    logger.info("cleaned up backup files");
+  } catch (e) {
+    logger.error(`error cleaning up backup files: ${e}`);
+  }
+}, MINUTELY * 20);
