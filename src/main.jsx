@@ -572,14 +572,24 @@ app.get("/", (c) => {
   const perPage = page === 1 ? 29 : 30;
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT *
-    FROM zig_repos
-    WHERE stars >= 10 AND forks >= 10
-    ORDER BY pushed_at DESC
+    SELECT 
+      r.*,
+      json_group_array(d.name) AS dependencies
+    FROM zig_repos r
+    LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
+    WHERE r.stars >= 10 AND r.forks >= 10
+    GROUP BY r.full_name
+    ORDER BY r.pushed_at DESC
     LIMIT ? OFFSET ?
   `);
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
+
+  repos.forEach((repo) => {
+    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
+      dep !== null
+    );
+  });
 
   logger.info(`GET /?page=${page} - ${repos.length} from db`);
   return c.html(
@@ -594,13 +604,23 @@ app.get("/new", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT *
-    FROM zig_repos
-    ORDER BY created_at DESC
+    SELECT 
+      r.*,
+      json_group_array(d.name) AS dependencies
+    FROM zig_repos r
+    LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
+    GROUP BY r.full_name
+    ORDER BY r.created_at DESC
     LIMIT ? OFFSET ?
   `);
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
+
+  repos.forEach((repo) => {
+    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
+      dep !== null
+    );
+  });
 
   logger.info(`GET /new?page=${page} - ${repos.length} from db`);
   return c.html(
@@ -615,14 +635,24 @@ app.get("/top", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT *
-    FROM zig_repos
-    WHERE forks >= 10
-    ORDER BY stars DESC
+    SELECT 
+      r.*,
+      json_group_array(d.name) AS dependencies
+    FROM zig_repos r
+    LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
+    WHERE r.forks >= 10
+    GROUP BY r.full_name
+    ORDER BY r.stars DESC
     LIMIT ? OFFSET ?
   `);
   const repos = stmt.all(perPage, offset);
   stmt.finalize();
+
+  repos.forEach((repo) => {
+    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
+      dep !== null
+    );
+  });
 
   logger.info(`GET /top?page=${page} - ${repos.length} from db`);
   return c.html(
