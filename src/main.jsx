@@ -3,10 +3,15 @@ import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
 import { ensureDirSync } from "@std/fs";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "s3";
+import { S3Client } from "s3";
 
 // ----------------------------------------------------------------------------
 // utils
+
+const SECONDLY = 1000;
+const MINUTELY = 60 * 1000;
+const HOURLY = 60 * MINUTELY;
+const DAILY = 24 * HOURLY;
 
 /**
  * Creates a logger object.
@@ -62,6 +67,10 @@ const createLogger = () => {
 };
 
 const logger = createLogger();
+setInterval(() => {
+  logger.flush();
+}, SECONDLY * 10);
+
 const db = new Database("db.sqlite");
 
 /**
@@ -80,6 +89,9 @@ const fatal = (message, data) => {
     Deno.exit(1);
   });
 };
+
+// ----------------------------------------------------------------------------
+// inits and healthchecks
 
 /**
  * @returns {void}
@@ -181,22 +193,23 @@ const githubHeaders = {
   Authorization: `Bearer ${GITHUB_API_KEY}`,
 };
 
-const R2_ENDPOINT = z.string().parse(Deno.env.get("R2_ENDPOINT"));
-const R2_ACCESS_KEY_ID = z.string().parse(Deno.env.get("R2_ACCESS_KEY_ID"));
-const R2_SECRET_ACCESS_KEY = z.string().parse(
-  Deno.env.get("R2_SECRET_ACCESS_KEY"),
-);
-if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
-  fatal("R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY are not set");
-}
+const R2_ENDPOINT = Deno.env.get("R2_ENDPOINT");
+const R2_ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID");
+const R2_SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY");
+if (!R2_ENDPOINT) fatal("R2_ENDPOINT is not set");
+if (!R2_ACCESS_KEY_ID) fatal("R2_ACCESS_KEY_ID is not set");
+if (!R2_SECRET_ACCESS_KEY) fatal("R2_SECRET_ACCESS_KEY is not set");
 
 const R2 = new S3Client({
+  // @ts-ignore - R2 envs is guaranteed to be valid (fatal if not)
+  endPoint: R2_ENDPOINT,
+  port: 443,
+  useSSL: true,
   region: "auto",
-  endpoint: R2_ENDPOINT,
-  credentials: {
-    accessKeyId: R2_ACCESS_KEY_ID,
-    secretAccessKey: R2_SECRET_ACCESS_KEY,
-  },
+  bucket: "ziglist-backups",
+  pathStyle: false,
+  accessKey: R2_ACCESS_KEY_ID,
+  secretKey: R2_SECRET_ACCESS_KEY,
 });
 
 const healthcheckGithub = () => {
@@ -221,6 +234,9 @@ const healthcheckDatabase = () => {
 };
 
 const healthcheckGithubFetch = async () => {
+  // TODO: do a very thorough check here
+  // fetch 1 page top, fetch 3 zons, verify all the deps
+  // on another db, then db close and delete file
   const base = "https://api.github.com/search/repositories";
   const query = `language:zig`;
   const encodedQuery = encodeURIComponent(query);
@@ -250,26 +266,23 @@ const healthcheckTailwind = () => {
 
 const healthcheckR2 = async () => {
   const timestamp = new Date().toISOString();
-  const params = {
-    Bucket: "ziglist-backups",
-    Key: "dummy.txt",
-    Body: timestamp,
-    ContentType: "text/plain",
+  const opts = {
+    "metadata": { "Content-Type": "text/plain" },
   };
-  try {
-    const data = await R2.send(new PutObjectCommand(params));
-    console.log(data);
-  } catch (err) {
-    console.log(err);
-  }
+  await R2.putObject("test.txt", timestamp, opts);
 
-  const getObjectParams = {
-    Bucket: "ziglist-backups",
-    Key: "dummy.txt",
-  };
-  const { Body } = await R2.send(new GetObjectCommand(getObjectParams));
-  const text = await Body.transformToString();
-  console.log(text);
+  const response = await R2.getObject("test.txt");
+  let contents = "";
+  const writable = new WritableStream({
+    write(chunk) {
+      contents += new TextDecoder().decode(chunk);
+    },
+  });
+  await response.body?.pipeTo(writable);
+  if (contents !== timestamp) {
+    fatal("R2 healthcheck failed");
+  }
+  logger.info("R2 healthcheck passed");
 };
 
 initDatabase();
@@ -794,11 +807,6 @@ const SchemaRepo = z.object({
 // ----------------------------------------------------------------------------
 // workers
 
-const SECONDLY = 1000;
-const MINUTELY = 60 * 1000;
-const HOURLY = 60 * MINUTELY;
-const DAILY = 24 * HOURLY;
-
 /**
  * Creates a date range string for GitHub search API.
  *
@@ -842,7 +850,7 @@ const b = setInterval(() => {
   workerRepoFetch.enqueue(url);
 }, MINUTELY);
 
-clearInterval(b);
+// clearInterval(b);
 
 // no need to cron this, this fetches 10 pages of popular zig repos
 const base = "https://api.github.com/search/repositories";
@@ -1090,10 +1098,6 @@ function zon2json(zon) {
     });
 }
 
-setInterval(() => {
-  logger.flush();
-}, SECONDLY * 10);
-
 // ----------------------------------------------------------------------------
 // backup db and log.txt
 
@@ -1110,24 +1114,15 @@ setInterval(async () => {
   }
 
   try {
-    await Promise.all([
-      R2.send(
-        new PutObjectCommand({
-          Bucket: "ziglist-backups",
-          Key: `backup-${timestamp}.sqlite`,
-          Body: await Deno.readFile("./backup.sqlite"),
-          ContentType: "application/x-sqlite3",
-        }),
-      ),
-      R2.send(
-        new PutObjectCommand({
-          Bucket: "ziglist-backups",
-          Key: `log-${timestamp}.txt`,
-          Body: await Deno.readFile("./log-backup.txt"),
-          ContentType: "text/plain",
-        }),
-      ),
-    ]);
+    const f1 = await Deno.readFile("./backup.sqlite");
+    await R2.putObject(`backup-${timestamp}.sqlite`, f1, {
+      metadata: { "Content-Type": "application/x-sqlite3" },
+    });
+    const f2 = await Deno.readFile("./log-backup.txt");
+    await R2.putObject(`log-${timestamp}.txt`, f2, {
+      metadata: { "Content-Type": "text/plain" },
+    });
+
     logger.info("backed up db and log.txt to R2");
   } catch (e) {
     logger.error(`error backing up db and log.txt to R2: ${e}`);
@@ -1140,4 +1135,4 @@ setInterval(async () => {
   } catch (e) {
     logger.error(`error cleaning up backup files: ${e}`);
   }
-}, MINUTELY * 20);
+}, HOURLY);
