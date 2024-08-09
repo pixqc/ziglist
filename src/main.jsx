@@ -214,20 +214,21 @@ const initDatabase = (innerDB) => {
       path TEXT,
       url_dependency_hash TEXT,
       FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
-      FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash)
+      FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
+      UNIQUE(full_name, name, dependency_type, path)
     );
     CREATE INDEX IF NOT EXISTS idx_zig_repos_pushed_at_stars_forks ON zig_repos(pushed_at DESC, stars, forks);
     CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
     CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
     CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
 `);
-  innerDB.exec(`PRAGMA foreign_keys = OFF;`);
 
   // Older Zig projects don't use zon files to list their dependencies
   // so we need to manually insert them
+  innerDB.exec(`PRAGMA foreign_keys = OFF;`);
   try {
     innerDB.exec(`
-      INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
+      INSERT OR IGNORE INTO zig_repo_dependencies (full_name, name, dependency_type, path)
       VALUES
         ('zigzap/zap', 'facil.io', 'path', 'facil.io'),
         ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
@@ -1431,9 +1432,9 @@ const backupInterval = setInterval(async () => {
 // ----------------------------------------------------------------------------
 // flags
 // this part could be better...
-
-if (IS_DEV) {
-  clearInterval(backupInterval);
-  clearInterval(zigReposInterval);
-  clearInterval(zonFetchInterval);
-}
+//
+// if (IS_DEV) {
+//   clearInterval(backupInterval);
+//   clearInterval(zigReposInterval);
+//   clearInterval(zonFetchInterval);
+// }
