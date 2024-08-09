@@ -221,50 +221,51 @@ const initDatabase = (innerDB) => {
     CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
     CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
 `);
-};
+  innerDB.exec(`PRAGMA foreign_keys = OFF;`);
 
-/**
- * Older Zig projects don't use zon files to list their dependencies
- * so we need to manually insert them
- *
- * @param {Database} innerDB
- * @returns {void}
- */
-const insertDependencies = (innerDB) => {
-  // zfl9/chinadns-ng: wolfssl, mimalloc
-  // cztomsik/graffiti: emlay, glfw, nanovg-zig, napigen
-  // empty out ziglang/zig
-  innerDB.exec(`
-    INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
-    VALUES ('zigzap/zap', 'facil.io', 'path', 'facil.io');
-
-    INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
-    VALUES
-      ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
-      ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
-      ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
-      ('oven-sh/bun', 'diffz', 'path', 'src/deps/diffz'),
-      ('oven-sh/bun', 'libarchive', 'path', 'src/deps/libarchive'),
-      ('oven-sh/bun', 'lol-html', 'path', 'src/deps/lol-html'),
-      ('oven-sh/bun', 'ls-hpack', 'path', 'src/deps/ls-hpack'),
-      ('oven-sh/bun', 'mimalloc', 'path', 'src/deps/mimalloc'),
-      ('oven-sh/bun', 'patches', 'path', 'src/deps/patches'),
-      ('oven-sh/bun', 'picohttpparser', 'path', 'src/deps/picohttpparser'),
-      ('oven-sh/bun', 'tinycc', 'path', 'src/deps/tinycc'),
-      ('oven-sh/bun', 'zig-clap', 'path', 'src/deps/zig-clap'),
-      ('oven-sh/bun', 'zig', 'path', 'src/deps/zig'),
-      ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
-      ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd');
-
-    INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
-    VALUES
-      ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
-      ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
-      ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
-      ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2');
-
-    INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
-    VALUES ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap');`);
+  // Older Zig projects don't use zon files to list their dependencies
+  // so we need to manually insert them
+  try {
+    innerDB.exec(`
+      INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
+      VALUES
+        ('zigzap/zap', 'facil.io', 'path', 'facil.io'),
+        ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
+        ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
+        ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
+        ('oven-sh/bun', 'diffz', 'path', 'src/deps/diffz'),
+        ('oven-sh/bun', 'libarchive', 'path', 'src/deps/libarchive'),
+        ('oven-sh/bun', 'lol-html', 'path', 'src/deps/lol-html'),
+        ('oven-sh/bun', 'ls-hpack', 'path', 'src/deps/ls-hpack'),
+        ('oven-sh/bun', 'mimalloc', 'path', 'src/deps/mimalloc'),
+        ('oven-sh/bun', 'patches', 'path', 'src/deps/patches'),
+        ('oven-sh/bun', 'picohttpparser', 'path', 'src/deps/picohttpparser'),
+        ('oven-sh/bun', 'tinycc', 'path', 'src/deps/tinycc'),
+        ('oven-sh/bun', 'zig-clap', 'path', 'src/deps/zig-clap'),
+        ('oven-sh/bun', 'zig', 'path', 'src/deps/zig'),
+        ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
+        ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd'),
+        ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
+        ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
+        ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
+        ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2'),
+        ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap'),
+        ('zfl9/chinadns-ng', 'wolfssl', 'path', 'dep/wolfssl'),
+        ('zfl9/chinadns-ng', 'mimalloc', 'path', 'dep/mimalloc'),
+        ('cztomsik/graffiti', 'emlay', 'path', 'deps/emlay'),
+        ('cztomsik/graffiti', 'glfw', 'path', 'deps/glfw'),
+        ('cztomsik/graffiti', 'nanovg-zig', 'path', 'deps/nanovg-zig'),
+        ('cztomsik/graffiti', 'napigen', 'path', 'deps/napigen'),
+        ('fubark/cyber', 'linenoise', 'path', 'lib/linenoise'),
+        ('fubark/cyber', 'tcc', 'path', 'lib/tcc'),
+        ('fubark/cyber', 'mimalloc', 'path', 'lib/mimalloc'),
+        ('Vexu/bog', 'linenoize', 'path', 'lib/linenoize'),
+        ('mewz-project/mewz', 'newlib', 'path', 'submodules/newlib'),
+        ('mewz-project/mewz', 'lwip', 'path', 'submodules/lwip')
+    `);
+  } finally {
+    innerDB.exec("PRAGMA foreign_keys = ON;");
+  }
 };
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
