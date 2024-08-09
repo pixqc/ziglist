@@ -144,10 +144,30 @@ const setEqual = (set1, set2) => {
   return set1.size === set2.size && [...set1].every((item) => set2.has(item));
 };
 
+/**
+ * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
+ *
+ * @param {string} zon - The contents of the zon file.
+ */
+function zon2json(zon) {
+  return zon
+    .replace(/(?<!:)\/\/.*$/gm, "") // Remove comments
+    .replace(/\.\{""}/g, ".{}") // Handle empty objects
+    .replace(/\.{/g, "{") // Replace leading dots before curly braces
+    .replace(/\.@"([^"]+)"?\s*=\s*/g, '"$1": ') // Handle .@"key" = value
+    .replace(/\.(\w+)\s*=\s*/g, '"$1": ') // Handle .key = value
+    .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]") // Convert paths to array
+    .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+    .replace(/"url"\s*:\s*"([^"]+)"/g, function (_, p1) {
+      // Special handling for URL to preserve '?' and '#'
+      return `"url": "${p1.replace(/"/g, '\\"')}"`;
+    });
+}
+
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-const db = new Database("db.sqlite");
+const db = new Database("from-fly.sqlite");
 
 /**
  * @param {Database} innerDB
@@ -248,6 +268,7 @@ const insertDependencies = (innerDB) => {
 };
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
+const IS_DEV = !IS_PROD;
 logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
@@ -396,7 +417,7 @@ initDatabase(db);
 healthcheckGithub();
 healthcheckDatabase();
 // healthcheckGithubFetch();
-healthcheckR2();
+// healthcheckR2();
 healthcheckTailwind();
 
 // ----------------------------------------------------------------------------
@@ -623,6 +644,14 @@ const Navigation = ({ currentPath }) => {
       >
         Top
       </a>
+      <a
+        href="/dependencies"
+        className={`${linkStyle} ${
+          currentPath === "/dependencies" ? textActive : textDisabled
+        }`}
+      >
+        Deps
+      </a>
 
       <div className="flex-grow flex flex-col">
         <div className="h-1/2 border-b border-stone-100 dark:border-stone-800">
@@ -701,17 +730,56 @@ const BaseLayout = ({ children, currentPath, page }) => (
         <Header />
         <Hero />
         <Navigation currentPath={currentPath} />
-        <div className="max-w-4xl mx-auto p-3 mb-6">
-          <div id="repo-grid">
+        <div className="max-w-4xl mx-auto px-3 py-6">
+          <div>
             {children}
           </div>
         </div>
-        <Pagination page={page} currentPath={currentPath} />
+        {typeof page === "number" && page > 0 && (
+          <Pagination page={page} currentPath={currentPath} />
+        )}
         <Footer />
       </body>
     </html>
   </>
 );
+
+const DependencyList = ({ deps }) => {
+  return (
+    <div>
+      {deps.map((repo, index) => (
+        <div key={index} className="mb-6">
+          <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1">
+            {repo.full_name}{" "}
+            <span className="font-normal text-sm text-stone-400 dark:text-stone-500">
+              depends on
+            </span>
+          </h3>
+          <ul className="list-none p-0 m-0">
+            {repo.dependencies.map((dep, depIndex) => (
+              <li
+                key={depIndex}
+                className="text-sm text-stone-700 dark:text-stone-300 mb-0.5"
+              >
+                {dep.name}{" "}
+                {dep.type === "url" && (
+                  <span className="text-xs text-stone-400 dark:text-stone-500 break-all">
+                    {dep.url}
+                  </span>
+                )}
+                {dep.type === "path" && (
+                  <span className="text-xs text-stone-400 dark:text-stone-500">
+                    {dep.path}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 // ----------------------------------------------------------------------------
 // routes
@@ -814,8 +882,40 @@ app.get("/top", (c) => {
 
   logger.info(`GET /top?page=${page} - ${repos.length} from db`);
   return c.html(
-    <BaseLayout currentPath="/top" page={page}>
+    <BaseLayout currentPath="/top" page={-1}>
       <RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
+    </BaseLayout>,
+  );
+});
+
+app.get("/dependencies", (c) => {
+  const stmt = db.prepare(`
+    SELECT 
+      zrd.full_name,
+      JSON_GROUP_ARRAY(
+        JSON_OBJECT(
+          'name', zrd.name,
+          'type', zrd.dependency_type,
+          'path', CASE WHEN zrd.dependency_type = 'path' THEN zrd.path ELSE NULL END,
+          'url', CASE WHEN zrd.dependency_type = 'url' THEN ud.url ELSE NULL END,
+          'hash', CASE WHEN zrd.dependency_type = 'url' THEN zrd.url_dependency_hash ELSE NULL END
+        )
+      ) AS dependencies
+    FROM 
+      zig_repo_dependencies zrd
+    LEFT JOIN 
+      url_dependencies ud ON zrd.url_dependency_hash = ud.hash
+    GROUP BY 
+      zrd.full_name
+    `);
+
+  const deps = stmt.all();
+  stmt.finalize();
+
+  // -1 to hide pagination
+  return c.html(
+    <BaseLayout currentPath="/dependencies" page={-1}>
+      <DependencyList deps={deps} />
     </BaseLayout>,
   );
 });
@@ -1205,7 +1305,7 @@ workerRepoFetch.listenQueue(async (url) => {
   }
 });
 
-setInterval(async () => {
+const zonFetchInterval = setInterval(async () => {
   // rate limit is 5000 per hour, 13 per minute
   const query = db.prepare(`
     SELECT full_name, default_branch
@@ -1275,32 +1375,10 @@ setInterval(async () => {
   }
 }, SECONDLY * 10);
 
-/**
- * Extracts data from a build.zig.zon file.
- *
- * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
- *
- * @param {string} zon - The contents of the zon file.
- */
-function zon2json(zon) {
-  return zon
-    .replace(/(?<!:)\/\/.*$/gm, "") // Remove comments
-    .replace(/\.\{""}/g, ".{}") // Handle empty objects
-    .replace(/\.{/g, "{") // Replace leading dots before curly braces
-    .replace(/\.@"([^"]+)"?\s*=\s*/g, '"$1": ') // Handle .@"key" = value
-    .replace(/\.(\w+)\s*=\s*/g, '"$1": ') // Handle .key = value
-    .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]") // Convert paths to array
-    .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
-    .replace(/"url"\s*:\s*"([^"]+)"/g, function (_, p1) {
-      // Special handling for URL to preserve '?' and '#'
-      return `"url": "${p1.replace(/"/g, '\\"')}"`;
-    });
-}
-
 // ----------------------------------------------------------------------------
 // backup db and log.txt
 
-setInterval(async () => {
+const backupInterval = setInterval(async () => {
   const timestamp = new Date().toISOString();
   try {
     const backupDB = new Database("./backup.sqlite");
@@ -1335,3 +1413,13 @@ setInterval(async () => {
     logger.error(`error cleaning up backup files: ${e}`);
   }
 }, HOURLY);
+
+// ----------------------------------------------------------------------------
+// flags
+// this part could be better...
+
+if (IS_DEV) {
+  clearInterval(backupInterval);
+  clearInterval(zigReposInterval);
+  clearInterval(zonFetchInterval);
+}
