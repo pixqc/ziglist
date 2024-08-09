@@ -110,6 +110,20 @@ const timeAgo = (unixSecond) => {
 };
 
 /**
+ * 81930 -> 81.9k
+ * 1000 -> 1.0k
+ * 999 -> 999
+ *
+ * @param {number} num - The number to format.
+ * @returns {string} - Formatted number as a string.
+ */
+const formatNumberK = (num) => {
+  if (num < 1000) return num.toString();
+  const thousands = num / 1000;
+  return (Math.floor(thousands * 10) / 10).toFixed(1) + "k";
+};
+
+/**
  * Some queries are done where it's between two dates, GitHub only returns
  * 1000 items for a query, this between two date condition makes it possible
  * to query more than 1000 repos
@@ -381,7 +395,7 @@ initDatabase(db);
 // should crash if any of the healthchecks fail
 healthcheckGithub();
 healthcheckDatabase();
-healthcheckGithubFetch();
+// healthcheckGithubFetch();
 healthcheckR2();
 healthcheckTailwind();
 
@@ -522,7 +536,7 @@ const RepoCard = ({ repo }) => {
           value={repo.minZigVersion.split("+")[0]}
         />
       )}
-      <RepoDetail kind="Stars" value={repo.stars} />
+      <RepoDetail kind="Stars" value={formatNumberK(repo.stars)} />
       <RepoDetail kind="Last commit" value={timeAgo(repo.pushed_at)} />
     </a>
   );
@@ -1314,7 +1328,7 @@ setInterval(async () => {
   }
 
   try {
-    await Deno.remove("./backup.db");
+    await Deno.remove("./backup.sqlite");
     await Deno.remove("./log-backup.txt");
     logger.info("cleaned up backup files");
   } catch (e) {
