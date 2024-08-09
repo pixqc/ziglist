@@ -71,8 +71,6 @@ setInterval(() => {
   logger.flush();
 }, SECONDLY * 10);
 
-const db = new Database("db.sqlite");
-
 /**
  * Crashes the program with an error message.
  *
@@ -84,6 +82,7 @@ const db = new Database("db.sqlite");
  * @param {Object} [data] - Additional data to log (optional).
  */
 const fatal = (message, data) => {
+  // TODO: should upload logs to R2
   logger.fatal(message, data);
   logger.flush().then(() => {
     Deno.exit(1);
@@ -93,9 +92,7 @@ const fatal = (message, data) => {
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-/**
- * @returns {void}
- */
+const db = new Database("db.sqlite");
 const initDatabase = () => {
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -215,13 +212,11 @@ const R2 = new S3Client({
 const healthcheckGithub = () => {
   fetch("https://api.github.com/zen", {
     headers: githubHeaders,
-  })
-    .then(() => {
-      logger.info("GITHUB_API_KEY is valid and usable");
-    })
-    .catch((e) => {
-      fatal(`GitHub API key is invalid: ${e}`);
-    });
+  }).then(() => {
+    logger.info("GITHUB_API_KEY is valid and usable");
+  }).catch((e) => {
+    fatal(`GitHub API key is invalid: ${e}`);
+  });
 };
 
 const healthcheckDatabase = () => {
@@ -360,9 +355,13 @@ const LucideGithub = () => (
   </svg>
 );
 
-const timeAgo = (timestamp) => {
+/**
+ * @param {number} unixSecond
+ * @returns {string} - Human-readable time difference.
+ */
+const timeAgo = (unixSecond) => {
   const moment = (new Date()).getTime() / 1000;
-  const diff = moment - timestamp;
+  const diff = moment - unixSecond;
   const intervals = [
     { label: "yr", seconds: 31536000 },
     { label: "wk", seconds: 604800 },
@@ -655,7 +654,7 @@ app.get("/", (c) => {
   const perPage = page === 1 ? 29 : 30;
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT 
+    SELECT
       r.*,
       json_group_array(d.name) AS dependencies
     FROM zig_repos r
@@ -687,7 +686,7 @@ app.get("/new", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT 
+    SELECT
       r.*,
       json_group_array(d.name) AS dependencies
     FROM zig_repos r
@@ -718,7 +717,7 @@ app.get("/top", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const stmt = db.prepare(`
-    SELECT 
+    SELECT
       r.*,
       json_group_array(d.name) AS dependencies
     FROM zig_repos r
@@ -761,6 +760,7 @@ Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
 // schemas
+
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -954,8 +954,8 @@ workerRepoFetch.listenQueue(async (url) => {
 
     upsertMany(rows);
     logger.info(`zig_repos bulk insert - len ${rows.length}`);
-  } catch (error) {
-    logger.error(`zig_repos bulk insert - ${error}`);
+  } catch (e) {
+    logger.error(`zig_repos bulk insert - ${e}`);
   } finally {
     if (stmt) stmt.finalize();
   }
@@ -974,8 +974,8 @@ workerRepoFetch.listenQueue(async (url) => {
     const rows = parsed.map((item) => [item.full_name, item.default_branch]);
     upsertMany(rows);
     logger.info(`zig_build_files bulk insert - len ${rows.length}`);
-  } catch (error) {
-    logger.error(`zig_build_files bulk insert - ${error}`);
+  } catch (e) {
+    logger.error(`zig_build_files bulk insert - ${e}`);
   } finally {
     if (stmt2) stmt2.finalize();
   }
@@ -1091,8 +1091,8 @@ setInterval(async () => {
       logger.info(`url_dependencies inserted: ${urlDepsCount}`);
       logger.info(`zig_repo_dependencies inserted: ${repoDepsCount}`);
     })();
-  } catch (error) {
-    logger.error(`error inserting zig_build_files: ${error}`);
+  } catch (e) {
+    logger.error(`error inserting zig_build_files: ${e}`);
   } finally {
     stmt1.finalize();
     stmt2.finalize();
