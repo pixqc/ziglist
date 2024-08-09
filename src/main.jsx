@@ -121,12 +121,26 @@ const timeAgo = (unixSecond) => {
 const makeDateRange = (start, end) =>
   `${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
 
+/**
+ * @param {Set<any>} set1
+ * @param {Set<any>} set2
+ * @returns {boolean}
+ */
+const setEqual = (set1, set2) => {
+  return set1.size === set2.size && [...set1].every((item) => set2.has(item));
+};
+
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
 const db = new Database("db.sqlite");
-const initDatabase = () => {
-  db.exec(`
+
+/**
+ * @param {Database} innerDB
+ * @returns {void}
+ */
+const initDatabase = (innerDB) => {
+  innerDB.exec(`
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS zig_repos (
       full_name TEXT PRIMARY KEY,
@@ -175,10 +189,18 @@ const initDatabase = () => {
 `);
 };
 
-// zfl9/chinadns-ng: wolfssl, mimalloc
-//cztomsik/graffiti: emlay, glfw, nanovg-zig, napigen
-const insertDependencies = () => {
-  db.exec(`
+/**
+ * Older Zig projects don't use zon files to list their dependencies
+ * so we need to manually insert them
+ *
+ * @param {Database} innerDB
+ * @returns {void}
+ */
+const insertDependencies = (innerDB) => {
+  // zfl9/chinadns-ng: wolfssl, mimalloc
+  // cztomsik/graffiti: emlay, glfw, nanovg-zig, napigen
+  // empty out ziglang/zig
+  innerDB.exec(`
     INSERT INTO zig_repo_dependencies (full_name, name, dependency_type, path)
     VALUES ('zigzap/zap', 'facil.io', 'path', 'facil.io');
 
@@ -245,46 +267,81 @@ const healthcheckGithub = () => {
   fetch("https://api.github.com/zen", {
     headers: githubHeaders,
   }).then(() => {
-    logger.info("GITHUB_API_KEY is valid and usable");
+    logger.info("healthcheck - GITHUB_API_KEY is valid and usable");
   }).catch((e) => {
-    fatal(`GitHub API key is invalid: ${e}`);
+    fatal(`healthcheck - GitHub API key is invalid: ${e}`);
   });
 };
 
 const healthcheckDatabase = () => {
   try {
     const _ = db.prepare("SELECT COUNT(*) FROM zig_repos").get();
-    logger.info("database is working");
+    logger.info("healthcheck - database is working");
   } catch (e) {
-    fatal(e);
+    fatal(`healthcheck - database is not working: ${e}`);
   }
 };
 
 const healthcheckGithubFetch = async () => {
-  // TODO: do a very thorough check here
-  // fetch 1 page top, fetch 3 zons, verify all the deps
-  // on another db, then db close and delete file
+  const dummyDB = new Database("./test-db.sqlite");
+  initDatabase(dummyDB);
+
   const base = "https://api.github.com/search/repositories";
   const query = `language:zig`;
   const encodedQuery = encodeURIComponent(query);
-  const url = `${base}?q=${encodedQuery}&per_page=2&page=1`;
+  const url = `${base}?q=${encodedQuery}&per_page=50&page=1`;
   const response = await fetch(url, { headers: githubHeaders });
-  const url2 =
-    "https://raw.githubusercontent.com/mitchellh/libxev/main/build.zig.zon";
-  const response2 = await fetch(url2);
-  if (response2.ok) {
-    logger.info(`zig_repos fetch - ${response2.status} - ${url2}`);
+
+  const data = await response.json();
+  const items = data.items.filter(Boolean);
+  const parsed = [];
+  for (const item of items) {
+    try {
+      const parsedItem = SchemaRepo.parse(item);
+      parsed.push(parsedItem);
+    } catch (e) {
+      logger.error("healthcheck - error parsing repos", {
+        fullName: item.full_name,
+        error: e,
+      });
+    }
   }
 
-  // parse both
+  if (parsed.length === 0) fatal("healthcheck - no repos fetched from GitHub");
+  const repos = parsed.map((item) => {
+    return { fullName: item.full_name, defaultBranch: item.default_branch };
+  });
+
+  const zons = await Promise.all(repos.map(fetchZon));
+
+  zigReposInsert(dummyDB, parsed);
+  dependenciesInsert(dummyDB, zons);
+
+  const q1 = dummyDB.prepare(`
+    SELECT full_name
+    FROM zig_repos
+  `);
+  const r1 = q1.all().map((row) => row.full_name);
+  q1.finalize();
+  const s1 = new Set(r1);
+  const s1Parsed = new Set(parsed.map((item) => item.full_name));
+  console.log(s1);
+  console.log(s1Parsed);
+  if (!setEqual(s1, s1Parsed)) fatal("healthcheck - zig_repos mismatch");
+
+  // set of url hashes
+
+  // @ts-ignore - lmao who cares
+  // const deps = zons.flatMap((zon) => zon.parsed?.dependencies).filter(Boolean);
 };
 
 let tailwindcss = "";
 const healthcheckTailwind = () => {
   try {
     tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
+    logger.info("healthcheck - tailwind.css is loaded");
   } catch (e) {
-    fatal(e);
+    fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
   }
 };
 
@@ -309,22 +366,22 @@ const healthcheckR2 = () => {
     })
     .then((contents) => {
       if (contents !== timestamp) {
-        fatal("R2 healthcheck failed");
+        fatal("healthcheck - R2 put/get failed");
       } else {
-        logger.info("R2 healthcheck passed");
+        logger.info("healthcheck - R2 works fine");
       }
     })
     .catch((error) => {
-      fatal(`R2 healthcheck failed: ${error}`);
+      fatal(`healthcheck - R2 put/get failed: ${error}`);
     });
 };
 
-initDatabase();
+initDatabase(db);
 
 // should crash if any of the healthchecks fail
 healthcheckGithub();
 healthcheckDatabase();
-// healthcheckGithubFetch();
+healthcheckGithubFetch();
 healthcheckR2();
 healthcheckTailwind();
 
@@ -822,6 +879,164 @@ const SchemaRepo = z.object({
 // ----------------------------------------------------------------------------
 // workers
 
+/**
+ * @param {Database} innerDB
+ * @param {z.infer<typeof SchemaRepo>[]} parsed
+ */
+const zigReposInsert = (innerDB, parsed) => {
+  const stmt = innerDB.prepare(`
+    INSERT OR REPLACE INTO zig_repos (
+      full_name, name, owner, description, homepage, license, created_at,
+      updated_at, pushed_at, stars, forks, default_branch, language
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `);
+
+  try {
+    const upsertMany = innerDB.transaction((data) => {
+      for (const row of data) {
+        stmt.run(row);
+      }
+    });
+
+    const rows = parsed.map((item) => [
+      item.full_name,
+      item.name,
+      item.owner,
+      item.description,
+      item.homepage,
+      item.license,
+      item.created_at,
+      item.updated_at,
+      item.pushed_at,
+      item.stars,
+      item.forks,
+      item.default_branch,
+      item.language,
+    ]);
+
+    upsertMany(rows);
+    logger.info(`zig_repos bulk insert - len ${rows.length}`);
+  } catch (e) {
+    logger.error(`zig_repos bulk insert - ${e}`);
+  } finally {
+    if (stmt) stmt.finalize();
+  }
+};
+
+/**
+ * @param {{ fullName: string, defaultBranch: string }} repo
+ * @returns {Promise<{
+ *   status: number,
+ *   fetchedAt: number,
+ *   fullName: string,
+ *   defaultBranch: string,
+ *   parsed?: z.infer<typeof SchemaZon>
+ * }>}
+ */
+const fetchZon = async (repo) => {
+  const url =
+    `https://raw.githubusercontent.com/${repo.fullName}/${repo.defaultBranch}/build.zig.zon`;
+  const response = await fetch(url);
+  const fetchedAt = Math.floor(Date.now() / 1000);
+  const status = response.status;
+
+  // not warning 404 because it's normal
+  if (status === 200 || status === 404) {
+    logger.info(`build.zig.zon fetch - status ${status} - ${repo.fullName}`);
+  } else {
+    logger.warn(`build.zig.zon fetch - status ${status} - ${repo.fullName}`);
+  }
+
+  let parsed;
+  if (status === 200) {
+    const contentRaw = await response.text();
+    try {
+      const content = JSON.parse(zon2json(contentRaw));
+      parsed = SchemaZon.parse(content);
+    } catch (e) {
+      logger.error(`error parsing zon file:`, {
+        fullName: repo.fullName,
+        error: e,
+      });
+    }
+  }
+
+  return {
+    status,
+    fetchedAt,
+    fullName: repo.fullName,
+    defaultBranch: repo.defaultBranch,
+    parsed,
+  };
+};
+
+/**
+ * @param {Database} innerDB
+ * @param {{
+ *   status: number,
+ *   fetchedAt: number,
+ *   fullName: string,
+ *   defaultBranch: string,
+ *   parsed?: z.infer<typeof SchemaZon>
+ * }[]} fetchResults
+ */
+const dependenciesInsert = (innerDB, fetchResults) => {
+  const stmt1 = innerDB.prepare(`
+    INSERT OR REPLACE INTO zig_build_files (
+      full_name, default_branch, build_zig_zon_exists, build_zig_zon_fetched_at
+    ) VALUES (?, ?, ?, ?)`);
+  const stmt2 = innerDB.prepare(`
+    INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+    VALUES (?, ?, ?)`);
+  const stmt3 = innerDB.prepare(`
+    INSERT INTO zig_repo_dependencies (
+      full_name, name, dependency_type, path, url_dependency_hash
+    ) VALUES (?, ?, ?, ?, ?)`);
+
+  let filesCount = 0;
+  let urlDepsCount = 0;
+  let repoDepsCount = 0;
+
+  try {
+    innerDB.transaction(() => {
+      for (const zon of fetchResults) {
+        stmt1.run(
+          zon.fullName,
+          zon.defaultBranch,
+          zon.status === 200,
+          zon.fetchedAt,
+        );
+        filesCount++;
+
+        if (zon.parsed && zon.parsed.dependencies) {
+          for (const [name, dep] of Object.entries(zon.parsed.dependencies)) {
+            if ("url" in dep) {
+              stmt2.run(dep.hash, name, dep.url);
+              stmt3.run(zon.fullName, name, "url", null, dep.hash);
+              urlDepsCount++;
+              repoDepsCount++;
+            } else if ("path" in dep) {
+              stmt3.run(zon.fullName, name, "path", dep.path, null);
+              repoDepsCount++;
+            }
+          }
+        }
+      }
+      logger.info(`zig_build_files inserted: ${filesCount}`);
+      logger.info(`url_dependencies inserted: ${urlDepsCount}`);
+      logger.info(`zig_repo_dependencies inserted: ${repoDepsCount}`);
+    })();
+  } catch (e) {
+    logger.error(`error inserting zig_build_files: ${e}`);
+  } finally {
+    stmt1.finalize();
+    stmt2.finalize();
+    stmt3.finalize();
+  }
+};
+
 const workerRepoFetch = await Deno.openKv(":memory:");
 
 // new stuff released last hour
@@ -988,54 +1203,6 @@ setInterval(async () => {
   query.finalize();
   if (repos.length === 0) return;
   logger.info(`zig_build_files fetch - fetching ${repos.length} zon files`);
-
-  /**
-   * @param {{ full_name: string, default_branch: string }} repo
-   * @returns {Promise<{
-   *   status: number,
-   *   fetchedAt: number,
-   *   fullName: string,
-   *   defaultBranch: string,
-   *   parsed?: z.infer<typeof SchemaZon>
-   * }>}
-   */
-  const fetchZon = async (repo) => {
-    const url =
-      `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/build.zig.zon`;
-    const response = await fetch(url);
-    const fetchedAt = Math.floor(Date.now() / 1000);
-    const status = response.status;
-
-    // not warning 404 because it's normal
-    if (status === 200 || status === 404) {
-      logger.info(`build.zig.zon fetch - status ${status} - ${repo.full_name}`);
-    } else {
-      logger.warn(`build.zig.zon fetch - status ${status} - ${repo.full_name}`);
-    }
-
-    let parsed;
-    if (status === 200) {
-      const contentRaw = await response.text();
-      try {
-        const content = JSON.parse(zon2json(contentRaw));
-        parsed = SchemaZon.parse(content);
-      } catch (e) {
-        logger.error(`error parsing zon file:`, {
-          fullName: repo.full_name,
-          error: e,
-        });
-      }
-    }
-    // TODO: handle 403 later
-
-    return {
-      status,
-      fetchedAt,
-      fullName: repo.full_name,
-      defaultBranch: repo.default_branch,
-      parsed,
-    };
-  };
 
   const stmt1 = db.prepare(`
     INSERT OR REPLACE INTO zig_build_files (
