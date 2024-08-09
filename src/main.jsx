@@ -167,7 +167,7 @@ function zon2json(zon) {
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-const db = new Database("from-fly.sqlite");
+const db = new Database("db.sqlite");
 
 /**
  * @param {Database} innerDB
@@ -750,7 +750,14 @@ const DependencyList = ({ deps }) => {
       {deps.map((repo, index) => (
         <div key={index} className="mb-6">
           <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1">
-            {repo.full_name}{" "}
+            <a
+              href={`https://github.com/${repo.full_name}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:underline"
+            >
+              {repo.full_name}
+            </a>{" "}
             <span className="font-normal text-sm text-stone-400 dark:text-stone-500">
               depends on
             </span>
@@ -1330,8 +1337,14 @@ const zonFetchInterval = setInterval(async () => {
       full_name, name, dependency_type, path, url_dependency_hash
     ) VALUES (?, ?, ?, ?, ?)`);
 
+  // FIXME: gracefully handle all snake_case (db) and camelCase (js)
+  const camelize = (repo) => ({
+    fullName: repo.full_name,
+    defaultBranch: repo.default_branch,
+  });
+
   // @ts-ignore repo type is Record<string, any>
-  const zons = await Promise.all(repos.map(fetchZon));
+  const zons = await Promise.all(repos.map(camelize).map(fetchZon));
 
   let filesCount = 0;
   let urlDepsCount = 0;
@@ -1412,7 +1425,7 @@ const backupInterval = setInterval(async () => {
   } catch (e) {
     logger.error(`error cleaning up backup files: ${e}`);
   }
-}, HOURLY);
+}, DAILY);
 
 // ----------------------------------------------------------------------------
 // flags
