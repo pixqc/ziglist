@@ -2,7 +2,6 @@ import "@std/dotenv/load";
 import { Database } from "sqlite";
 import { Hono } from "hono";
 import { z } from "zod";
-import { ensureDirSync } from "@std/fs";
 import { S3Client } from "s3";
 
 // ----------------------------------------------------------------------------
@@ -14,7 +13,6 @@ const HOURLY = 60 * MINUTELY;
 const DAILY = 24 * HOURLY;
 
 /**
- * Creates a logger object.
  * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
  *
  * @returns {{
@@ -72,8 +70,6 @@ setInterval(() => {
 }, SECONDLY * 10);
 
 /**
- * Crashes the program with an error message.
- *
  * A wise man once said:
  * Runtime crashes are better than bugs.
  * Compile errors are better than runtime crashes.
@@ -88,6 +84,42 @@ const fatal = (message, data) => {
     Deno.exit(1);
   });
 };
+
+/**
+ * @param {number} unixSecond
+ * @returns {string} - Human-readable time difference.
+ */
+const timeAgo = (unixSecond) => {
+  const moment = (new Date()).getTime() / 1000;
+  const diff = moment - unixSecond;
+  const intervals = [
+    { label: "yr", seconds: 31536000 },
+    { label: "wk", seconds: 604800 },
+    { label: "d", seconds: 86400 },
+    { label: "hr", seconds: 3600 },
+    { label: "min", seconds: 60 },
+    { label: "sec", seconds: 1 },
+  ];
+  for (let i = 0; i < intervals.length; i++) {
+    const count = Math.floor(diff / intervals[i].seconds);
+    if (count > 0) {
+      return `${count}${intervals[i].label} ago`;
+    }
+  }
+  return "just now";
+};
+
+/**
+ * Some queries are done where it's between two dates, GitHub only returns
+ * 1000 items for a query, this between two date condition makes it possible
+ * to query more than 1000 repos
+ *
+ * @param {Date} start
+ * @param {Date} end
+ * @returns {string}
+ */
+const makeDateRange = (start, end) =>
+  `${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
 
 // ----------------------------------------------------------------------------
 // inits and healthchecks
@@ -237,9 +269,6 @@ const healthcheckGithubFetch = async () => {
   const encodedQuery = encodeURIComponent(query);
   const url = `${base}?q=${encodedQuery}&per_page=2&page=1`;
   const response = await fetch(url, { headers: githubHeaders });
-  if (response.ok) {
-    logger.info(`zig_repos fetch - ${response.status} - ${url}`);
-  }
   const url2 =
     "https://raw.githubusercontent.com/mitchellh/libxev/main/build.zig.zon";
   const response2 = await fetch(url2);
@@ -301,7 +330,7 @@ healthcheckTailwind();
 
 // ----------------------------------------------------------------------------
 // jsx components
-// note: this is not React, jsx is only for templating
+// note: this is not a React application, jsx is only for templating
 
 const LucideChevronLeft = () => (
   <svg
@@ -354,30 +383,6 @@ const LucideGithub = () => (
     <path d="M9 18c-4.51 2-5-2-7-2" />
   </svg>
 );
-
-/**
- * @param {number} unixSecond
- * @returns {string} - Human-readable time difference.
- */
-const timeAgo = (unixSecond) => {
-  const moment = (new Date()).getTime() / 1000;
-  const diff = moment - unixSecond;
-  const intervals = [
-    { label: "yr", seconds: 31536000 },
-    { label: "wk", seconds: 604800 },
-    { label: "d", seconds: 86400 },
-    { label: "hr", seconds: 3600 },
-    { label: "min", seconds: 60 },
-    { label: "sec", seconds: 1 },
-  ];
-  for (let i = 0; i < intervals.length; i++) {
-    const count = Math.floor(diff / intervals[i].seconds);
-    if (count > 0) {
-      return `${count}${intervals[i].label} ago`;
-    }
-  }
-  return "just now";
-};
 
 const Badge = ({ value }) => (
   <span className="p-0.5 bg-[#eeedec] text-stone-500 dark:bg-[#363230] dark:text-stone-400 rounded-sm text-xs inline-block">
@@ -817,16 +822,6 @@ const SchemaRepo = z.object({
 // ----------------------------------------------------------------------------
 // workers
 
-/**
- * Creates a date range string for GitHub search API.
- *
- * @param {Date} start
- * @param {Date} end
- * @returns {string}
- */
-const makeDateRange = (start, end) =>
-  `${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
-
 const workerRepoFetch = await Deno.openKv(":memory:");
 
 // new stuff released last hour
@@ -981,7 +976,6 @@ workerRepoFetch.listenQueue(async (url) => {
   }
 });
 
-ensureDirSync("./.build-zig-files");
 setInterval(async () => {
   // rate limit is 5000 per hour, 13 per minute
   const query = db.prepare(`
