@@ -5,14 +5,10 @@ import { z } from "zod";
 import { S3Client } from "s3";
 
 // TODO:
-// 1. fetch build.zig; filter out projects without build.zig
-// 2. on first boot: fetch database from r2, use as db
-// 3. everything related to data should be snake_case, KISS
-//    stuff from github, insertion to db, fetched from db: snake_case
-// 4. reliable indexer
-//    use etag and last-modified for checking pushed_at
-// 5. simplify indexer, KISS
-// 6. include min zig version!!
+// - fetch build.zig; filter out projects without build.zig
+// - on first boot: fetch database from r2, use as db
+// - reliable indexer
+//   use etag and last-modified for checking pushed_at
 
 // ----------------------------------------------------------------------------
 // utils
@@ -1097,9 +1093,10 @@ const zigReposFetch = async (url) => {
 };
 
 // TODO: robust fetching strategy
+
 setInterval(async () => {
   /** @type {string | undefined} */
-  let url = zigReposURLMake("top");
+  let url = zigReposURLMake("all");
   const parsed = [];
 
   while (url) {
@@ -1258,83 +1255,84 @@ const zigBuildFetch = async (url) => {
   };
 };
 
-const stmt = db.prepare(`
+setInterval(async () => {
+  const stmt = db.prepare(`
     SELECT full_name, default_branch
     FROM zig_repos
     WHERE build_zig_zon_fetched_at IS NULL
     LIMIT 13;`);
 
-const repos = stmt.all();
-stmt.finalize();
-console.log(repos);
+  const repos = stmt.all();
+  stmt.finalize();
 
-const deps = [];
-const repoMetadata = [];
-const urlDeps = [];
+  const deps = [];
+  const repoMetadata = [];
+  const urlDeps = [];
 
-await Promise.all(repos.map(async (repo) => {
-  const url = zigBuildURLMake(repo.full_name, repo.default_branch, "zon");
-  const res = await zigBuildFetch(url);
-  if (res.status === 200 || res.status === 404) {
-    logger.info(
-      `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
-    );
-  } else {
-    logger.warn(
-      `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
-    );
-  }
-
-  let parsed;
-  if (res.status === 200) {
-    try {
-      parsed = SchemaZon.parse(JSON.parse(zon2json(res.content)));
-    } catch (e) {
-      logger.error("SchemaZon.parse or zon2json", {
-        fullName: repo.full_name,
-        error: e,
-      });
+  await Promise.all(repos.map(async (repo) => {
+    const url = zigBuildURLMake(repo.full_name, repo.default_branch, "zon");
+    const res = await zigBuildFetch(url);
+    if (res.status === 200 || res.status === 404) {
+      logger.info(
+        `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
+      );
+    } else {
+      logger.warn(
+        `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
+      );
     }
-  }
 
-  repoMetadata.push({
-    full_name: repo.full_name,
-    min_zig_version: parsed?.minimum_zig_version,
-    zonExists: res.status === 200,
-    fetchedAt: res.fetchedAt,
-  });
-
-  if (parsed?.dependencies) {
-    Object.entries(parsed.dependencies).forEach(([name, dep]) => {
-      if ("url" in dep && "hash" in dep) {
-        deps.push({
-          full_name: repo.full_name,
-          name: name,
-          dependency_type: "url",
-          path: null,
-          url_dependency_hash: dep.hash,
-        });
-        urlDeps.push({
-          name: name,
-          url: dep.url,
-          hash: dep.hash,
-        });
-      } else if ("path" in dep) {
-        deps.push({
-          full_name: repo.full_name,
-          name: name,
-          dependency_type: "path",
-          path: dep.path,
-          url_dependency_hash: null,
+    let parsed;
+    if (res.status === 200) {
+      try {
+        parsed = SchemaZon.parse(JSON.parse(zon2json(res.content)));
+      } catch (e) {
+        logger.error("SchemaZon.parse or zon2json", {
+          fullName: repo.full_name,
+          error: e,
         });
       }
-    });
-  }
-}));
+    }
 
-zigReposZonUpdate(db, repoMetadata);
-zigRepoDependenciesInsert(db, deps);
-urlDependenciesInsert(db, urlDeps);
+    repoMetadata.push({
+      full_name: repo.full_name,
+      min_zig_version: parsed?.minimum_zig_version,
+      zonExists: res.status === 200,
+      fetchedAt: res.fetchedAt,
+    });
+
+    if (parsed?.dependencies) {
+      Object.entries(parsed.dependencies).forEach(([name, dep]) => {
+        if ("url" in dep && "hash" in dep) {
+          deps.push({
+            full_name: repo.full_name,
+            name: name,
+            dependency_type: "url",
+            path: null,
+            url_dependency_hash: dep.hash,
+          });
+          urlDeps.push({
+            name: name,
+            url: dep.url,
+            hash: dep.hash,
+          });
+        } else if ("path" in dep) {
+          deps.push({
+            full_name: repo.full_name,
+            name: name,
+            dependency_type: "path",
+            path: dep.path,
+            url_dependency_hash: null,
+          });
+        }
+      });
+    }
+  }));
+
+  zigReposZonUpdate(db, repoMetadata);
+  urlDependenciesInsert(db, urlDeps);
+  zigRepoDependenciesInsert(db, deps);
+}, SECONDLY * 10);
 
 // ----------------------------------------------------------------------------
 // backup db and log.txt
@@ -1373,7 +1371,7 @@ const backupInterval = setInterval(async () => {
   } catch (e) {
     logger.error(`error cleaning up backup files: ${e}`);
   }
-}, DAILY);
+}, HOURLY * 3);
 
 // ----------------------------------------------------------------------------
 // flags
