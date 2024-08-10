@@ -951,25 +951,7 @@ logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
-// schemas
-
-const SchemaZon = z.object({
-  name: z.string(),
-  version: z.string(),
-  minimum_zig_version: z.string().optional(),
-  paths: z.array(z.string()).optional(),
-  dependencies: z.record(z.union([
-    z.object({
-      url: z.string(),
-      hash: z.string(),
-      lazy: z.boolean().optional(),
-    }),
-    z.object({
-      path: z.string(),
-      lazy: z.boolean().optional(),
-    }),
-  ])).optional(),
-});
+// indexer
 
 const SchemaRepo = z.object({
   name: z.string(),
@@ -1005,9 +987,6 @@ const SchemaRepo = z.object({
   homepage: homepage || null,
   ...rest,
 }));
-
-// ----------------------------------------------------------------------------
-// indexer
 
 /**
  * @param {Database} innerDB
@@ -1101,7 +1080,6 @@ const zigReposURLMake = (type) => {
  */
 const zigReposFetch = async (url) => {
   const response = await fetch(url);
-  console.log(response);
   let next;
   const linkHeader = response.headers.get("link");
   if (linkHeader) {
@@ -1118,6 +1096,7 @@ const zigReposFetch = async (url) => {
   };
 };
 
+// TODO: robust fetching strategy
 setInterval(async () => {
   /** @type {string | undefined} */
   let url = zigReposURLMake("top");
@@ -1131,7 +1110,7 @@ setInterval(async () => {
         const parsedItem = SchemaRepo.parse(item);
         parsed.push(parsedItem);
       } catch (e) {
-        logger.error("error parsing repos", {
+        logger.error("SchemaRepo.parse", {
           fullName: item.full_name,
           error: e,
         });
@@ -1141,7 +1120,272 @@ setInterval(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   zigReposInsert(db, parsed);
-}, HOURLY);
+}, MINUTELY);
+
+const SchemaZon = z.object({
+  name: z.string(),
+  version: z.string(),
+  minimum_zig_version: z.string().optional(),
+  paths: z.array(z.string()).optional(),
+  dependencies: z.record(z.union([
+    z.object({
+      url: z.string(),
+      hash: z.string(),
+      lazy: z.boolean().optional(),
+    }),
+    z.object({
+      path: z.string(),
+      lazy: z.boolean().optional(),
+    }),
+  ])).optional(),
+});
+
+/**
+ * @param {Object} parsed
+ * @param {string} parsed.full_name
+ * @param {string|undefined} parsed.min_zig_version
+ * @param {boolean} parsed.zonExists
+ * @param {number} parsed.fetchedAt
+ */
+const zigReposZonUpdate = (innerDB, parsed) => {
+  const { full_name, min_zig_version, zonExists, fetchedAt } = parsed;
+
+  const stmt = innerDB.prepare(`
+    UPDATE zig_repos
+    SET min_zig_version = ?,
+        build_zig_zon_exists = ?,
+        build_zig_zon_fetched_at = ?
+    WHERE full_name = ?
+  `);
+
+  try {
+    stmt.run(min_zig_version ?? null, zonExists, fetchedAt, full_name);
+    logger.info(`zig_repos zon update ${full_name}`);
+  } catch (e) {
+    logger.error(`zig_repos zon update ${full_name} - ${e}`);
+  } finally {
+    if (stmt) stmt.finalize();
+  }
+};
+
+const URLDependenciesInsert = (innerDB, parsed) => {
+  const stmt = innerDB.prepare(`
+    INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+    VALUES (?, ?, ?)
+  `);
+
+  try {
+    const upsertMany = innerDB.transaction((data) => {
+      for (const row of data) {
+        stmt.run(row);
+      }
+    });
+
+    const rows = parsed.map((item) => [
+      item.hash,
+      item.name,
+      item.url,
+    ]);
+
+    upsertMany(rows);
+    logger.info(`url_dependencies bulk insert - len ${rows.length}`);
+  } catch (e) {
+    logger.error(`url_dependencies bulk insert - ${e}`);
+  } finally {
+    if (stmt) stmt.finalize();
+  }
+};
+
+/**
+ * @param {string} full_name
+ * @param {string} default_branch
+ * @param {'zon' | 'zig'} type
+ * @returns {string}
+ */
+const zigBuildURLMake = (full_name, default_branch, type) => {
+  const base = "https://raw.githubusercontent.com";
+  let url = `${base}/${full_name}/${default_branch}`;
+  if (type === "zon") {
+    url = `${url}/build.zig.zon`;
+  } else if (type === "zig") {
+    url = `${url}/build.zig`;
+  } else {
+    logger.error(`zigBuildURLMake - invalid type: ${type}`);
+    fatal(`zigBuildURLMake - invalid type ${typeof type}`);
+  }
+  return url;
+};
+
+const zigBuildFetch = async (url) => {
+  const response = await fetch(url);
+  const fetchedAt = Math.floor(Date.now() / 1000);
+  return {
+    status: response.status,
+    fetchedAt,
+    content: await response.text(),
+  };
+};
+
+const stmt = db.prepare(`
+    SELECT full_name, default_branch
+    FROM zig_repos
+    WHERE build_zig_zon_fetched_at IS NULL
+    LIMIT 13;`);
+
+const repos = stmt.all();
+stmt.finalize();
+console.log(repos);
+
+repos.map(async (repo) => {
+  const url = zigBuildURLMake(repo.full_name, repo.default_branch, "zon");
+  const res = await zigBuildFetch(url);
+  if (res.status === 200 || res.status === 404) {
+    logger.info(
+      `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
+    );
+  } else {
+    logger.warn(
+      `build.zig.zon fetch - status ${res.status} - ${repo.full_name}`,
+    );
+  }
+
+  let parsed;
+  if (res.status === 200) {
+    try {
+      parsed = SchemaZon.parse(JSON.parse(zon2json(res.content)));
+    } catch (e) {
+      logger.error("SchemaZon.parse or zon2json", {
+        fullName: repo.full_name,
+        error: e,
+      });
+    }
+  }
+
+  zigReposZonUpdate(db, {
+    full_name: repo.full_name,
+    min_zig_version: parsed?.minimum_zig_version,
+    zonExists: res.status === 200,
+    fetchedAt: res.fetchedAt,
+  });
+
+  const URLDependencies = parsed?.dependencies
+    ? Object.entries(parsed.dependencies)
+      .map(([name, dep]) => {
+        if ("url" in dep && "hash" in dep) {
+          return {
+            name: name,
+            url: dep.url,
+            hash: dep.hash,
+          };
+        }
+        return null;
+      })
+      .filter(Boolean)
+    : [];
+  if (URLDependencies.length > 0) URLDependenciesInsert(db, URLDependencies);
+});
+
+// const urls = repos.map((repo) =>
+//   zigBuildURLMake(repo.full_name, repo.default_branch, "zon")
+// );
+// urls.map(async(url) => {
+//   const res = await zigBuildFetch(url);
+// if (res.status === 200 || res.status === 404) {
+//   logger.info(`build.zig.zon fetch - status ${res.status} - ${name}`);
+// } else {
+//   logger.warn(`build.zig.zon fetch - status ${res.status} - ${branch}`);
+// }
+//
+// })
+
+// const name = "oven-sh/bun";
+// const branch = "main";
+// const url = zigBuildURLMake(name, branch, "zon");
+// const res = await zigBuildFetch(url);
+//
+// // not warning 404 because it's normal
+// if (res.status === 200 || res.status === 404) {
+//   logger.info(`build.zig.zon fetch - status ${res.status} - ${name}`);
+// } else {
+//   logger.warn(`build.zig.zon fetch - status ${res.status} - ${branch}`);
+// }
+// let parsed;
+// if (res.status === 200) {
+//   try {
+//     parsed = SchemaZon.parse(JSON.parse(zon2json(res.content)));
+//   } catch (e) {
+//     logger.error(`SchemaZon.parse or zon2json`, {
+//       fullName: name,
+//       error: e,
+//     });
+//   }
+// }
+//
+// zigReposZonUpdate(
+//   name,
+//   parsed?.minimum_zig_version,
+//   res.status === 200,
+//   res.fetchedAt,
+// );
+
+// ----------------------------------------------------------------------------
+// oldies
+
+//   const stmt1 = db.prepare(`
+//     INSERT OR REPLACE INTO zig_build_files (
+//       full_name, default_branch, build_zig_zon_exists, build_zig_zon_fetched_at
+//     ) VALUES (?, ?, ?, ?)`);
+//
+//   const stmt2 = db.prepare(`
+//     INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+//     VALUES (?, ?, ?)`);
+//   const stmt3 = db.prepare(`
+//     INSERT INTO zig_repo_dependencies (
+//       full_name, name, dependency_type, path, url_dependency_hash
+//     ) VALUES (?, ?, ?, ?, ?)`);
+//
+//   // FIXME: gracefully handle all snake_case (db) and camelCase (js)
+//   const camelize = (repo) => ({
+//     fullName: repo.full_name,
+//     defaultBranch: repo.default_branch,
+//   });
+//
+//   // @ts-ignore repo type is Record<string, any>
+//   const zons = await Promise.all(repos.map(camelize).map(fetchZon));
+//
+//   let filesCount = 0;
+//   let urlDepsCount = 0;
+//   let repoDepsCount = 0;
+//
+//   try {
+//     db.transaction(() => {
+//       for (const zon of zons) {
+//         stmt1.run(
+//           zon.fullName,
+//           zon.defaultBranch,
+//           zon.status === 200,
+//           zon.fetchedAt,
+//         );
+//         filesCount++;
+//
+//         if (zon.parsed && zon.parsed.dependencies) {
+//           for (const [name, dep] of Object.entries(zon.parsed.dependencies)) {
+//             if ("url" in dep) {
+//               stmt2.run(dep.hash, name, dep.url);
+//               stmt3.run(zon.fullName, name, "url", null, dep.hash);
+//               urlDepsCount++;
+//               repoDepsCount++;
+//             } else if ("path" in dep) {
+//               stmt3.run(zon.fullName, name, "path", dep.path, null);
+//               repoDepsCount++;
+//             }
+//           }
+//         }
+//       }
+//       logger.info(`zig_build_files inserted: ${filesCount}`);
+//       logger.info(`url_dependencies inserted: ${urlDepsCount}`);
+//       logger.info(`zig_repo_dependencies inserted: ${repoDepsCount}`);
+//     })();
 
 // /**
 //  * @param {{ fullName: string, defaultBranch: string }} repo
