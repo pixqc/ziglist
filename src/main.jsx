@@ -745,7 +745,7 @@ const DependencyList = ({ deps }) => {
     <div>
       {deps.map((repo, index) => (
         <div key={index} className="mb-6 flex flex-col space-y-0">
-          <h3 className="font-semibold text-stone-900 dark:text-stone-100">
+          <h3 className="font-semibold text-stone-900 dark:text-stone-100 overflow-hidden">
             <a
               href={`https://github.com/${repo.full_name}`}
               target="_blank"
@@ -754,19 +754,18 @@ const DependencyList = ({ deps }) => {
             >
               {repo.full_name}
             </a>
-            {" "}
           </h3>
           <span className="font-normal text-sm text-stone-300 dark:text-stone-600">
             dependencies
           </span>
-          <ul className="list-none p-0 m-0">
+          <ul className="list-none p-0 m-0 overflow-hidden">
             {repo.dependencies.map((dep, depIndex) => (
               <li
                 key={depIndex}
                 className="text-sm text-stone-700 dark:text-stone-300 flex items-start"
               >
-                <span className="flex-shrink-0 mr-2">{dep.name}</span>
-                <div className="flex-grow flex flex-col px-3 pt-2.5 min-w-20">
+                <span className="flex-shrink-0">{dep.name}</span>
+                <div className="flex flex-grow flex-col px-1 sm:px-3 pt-2.5 min-w-0">
                   <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
                   <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
                 </div>
@@ -776,7 +775,7 @@ const DependencyList = ({ deps }) => {
                   </span>
                 )}
                 {dep.type === "path" && (
-                  <span className="text-sm text-stone-400 dark:text-stone-500">
+                  <span className="text-sm text-stone-400 dark:text-stone-500 text-right">
                     [path] {dep.path}
                   </span>
                 )}
