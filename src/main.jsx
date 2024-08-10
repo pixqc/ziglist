@@ -4,6 +4,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { S3Client } from "s3";
 
+// TODO:
+// 1. fetch build.zig; filter out projects without build.zig
+// 2. on first boot: fetch database from r2, use as db
+// 3. db snake_case, all selects must be camelCase
+// 4. reliable indexer, use webhook to update pushed_at
+// 5. simplify indexer, KISS
+
 // ----------------------------------------------------------------------------
 // utils
 
@@ -419,7 +426,7 @@ initDatabase(db);
 healthcheckGithub();
 healthcheckDatabase();
 // healthcheckGithubFetch();
-// healthcheckR2();
+if (IS_PROD) healthcheckR2();
 healthcheckTailwind();
 
 // ----------------------------------------------------------------------------
@@ -511,7 +518,7 @@ const SpecialCard = () => {
         href="https://github.com/pixqc/ziglist/issues"
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-block w-full text-center text-xs py-1.5 bg-[#eeedec] dark:bg-[#363230] text-stone-800 dark:text-stone-200 rounded-md hover:bg-stone-300 dark:hover:bg-stone-600 transition-colors"
+        className="inline-block w-full text-center text-sm py-1.5 bg-[#eeedec] dark:bg-[#363230] text-stone-800 dark:text-stone-200 rounded-md hover:bg-stone-300 dark:hover:bg-stone-600 transition-colors"
       >
         GitHub Issues
       </a>
@@ -770,12 +777,12 @@ const DependencyList = ({ deps }) => {
                   <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
                 </div>
                 {dep.type === "url" && (
-                  <span className="text-xs sm:text-sm text-stone-400 dark:text-stone-500 break-all sm:text-right">
+                  <span className="text-sm text-stone-400 dark:text-stone-500 break-all sm:text-right">
                     {dep.url}
                   </span>
                 )}
                 {dep.type === "path" && (
-                  <span className="text-xs sm:text-sm text-stone-400 dark:text-stone-500 sm:text-right">
+                  <span className="jext-sm text-stone-400 dark:text-stone-500 sm:text-right">
                     [path] {dep.path}
                   </span>
                 )}
