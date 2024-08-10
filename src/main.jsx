@@ -889,7 +889,7 @@ app.get("/top", (c) => {
 
   logger.info(`GET /top?page=${page} - ${repos.length} from db`);
   return c.html(
-    <BaseLayout currentPath="/top" page={-1}>
+    <BaseLayout currentPath="/top" page={page}>
       <RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
     </BaseLayout>,
   );
