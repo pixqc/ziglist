@@ -762,20 +762,20 @@ const DependencyList = ({ deps }) => {
             {repo.dependencies.map((dep, depIndex) => (
               <li
                 key={depIndex}
-                className="text-sm text-stone-700 dark:text-stone-300 flex items-start"
+                className="text-sm text-stone-700 dark:text-stone-300 sm:flex sm:items-start"
               >
-                <span className="flex-shrink-0">{dep.name}</span>
-                <div className="flex flex-grow flex-col px-1 sm:px-3 pt-2.5 min-w-0">
+                <span className="flex-shrink-0 mr-1 sm:mr-0">{dep.name}</span>
+                <div className="hidden sm:flex flex-grow flex-col px-1 sm:px-2 pt-2.5 min-w-0">
                   <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
                   <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
                 </div>
                 {dep.type === "url" && (
-                  <span className="text-sm text-stone-400 dark:text-stone-500 break-all text-right">
+                  <span className="text-xs sm:text-sm text-stone-400 dark:text-stone-500 break-all sm:text-right">
                     {dep.url}
                   </span>
                 )}
                 {dep.type === "path" && (
-                  <span className="text-sm text-stone-400 dark:text-stone-500 text-right">
+                  <span className="text-xs sm:text-sm text-stone-400 dark:text-stone-500 sm:text-right">
                     [path] {dep.path}
                   </span>
                 )}
