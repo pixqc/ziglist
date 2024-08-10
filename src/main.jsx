@@ -1140,16 +1140,7 @@ const SchemaZon = z.object({
   ])).optional(),
 });
 
-/**
- * @param {Object} parsed
- * @param {string} parsed.full_name
- * @param {string|undefined} parsed.min_zig_version
- * @param {boolean} parsed.zonExists
- * @param {number} parsed.fetchedAt
- */
 const zigReposZonUpdate = (innerDB, parsed) => {
-  const { full_name, min_zig_version, zonExists, fetchedAt } = parsed;
-
   const stmt = innerDB.prepare(`
     UPDATE zig_repos
     SET min_zig_version = ?,
@@ -1159,16 +1150,27 @@ const zigReposZonUpdate = (innerDB, parsed) => {
   `);
 
   try {
-    stmt.run(min_zig_version ?? null, zonExists, fetchedAt, full_name);
-    logger.info(`zig_repos zon update ${full_name}`);
+    const bulkUpdate = innerDB.transaction((data) => {
+      for (const row of data) {
+        stmt.run(
+          row.min_zig_version ?? null,
+          row.zonExists,
+          row.fetchedAt,
+          row.full_name,
+        );
+      }
+    });
+
+    bulkUpdate(parsed);
+    logger.info(`zig_repos zon bulk update - len ${parsed.length}`);
   } catch (e) {
-    logger.error(`zig_repos zon update ${full_name} - ${e}`);
+    logger.error(`zig_repos zon bulk update - ${e}`);
   } finally {
     if (stmt) stmt.finalize();
   }
 };
 
-const URLDependenciesInsert = (innerDB, parsed) => {
+const urlDependenciesInsert = (innerDB, parsed) => {
   const stmt = innerDB.prepare(`
     INSERT OR IGNORE INTO url_dependencies (hash, name, url)
     VALUES (?, ?, ?)
@@ -1180,19 +1182,49 @@ const URLDependenciesInsert = (innerDB, parsed) => {
         stmt.run(row);
       }
     });
-
     const rows = parsed.map((item) => [
       item.hash,
       item.name,
       item.url,
     ]);
-
     upsertMany(rows);
     logger.info(`url_dependencies bulk insert - len ${rows.length}`);
   } catch (e) {
     logger.error(`url_dependencies bulk insert - ${e}`);
   } finally {
     if (stmt) stmt.finalize();
+  }
+};
+
+/**
+ * @param {Database} innerDB
+ * @param {Object[]} parsed
+ */
+const zigRepoDependenciesInsert = (innerDB, parsed) => {
+  const stmt = innerDB.prepare(`
+    INSERT INTO zig_repo_dependencies (
+      full_name, name, dependency_type, path, url_dependency_hash
+    ) VALUES (?, ?, ?, ?, ?)`);
+
+  try {
+    const upsertMany = innerDB.transaction((data) => {
+      for (const row of data) {
+        stmt.run(row);
+      }
+    });
+
+    const rows = parsed.map((item) => [
+      item.full_name,
+      item.name,
+      item.dependency_type,
+      item.path,
+      item.url_dependency_hash,
+    ]);
+
+    upsertMany(rows);
+    logger.info(`zig_repo_dependencies bulk insert - len ${rows.length}`);
+  } catch (e) {
+    logger.error(`zig_repo_dependencies bulk insert - ${e}`);
   }
 };
 
@@ -1236,7 +1268,11 @@ const repos = stmt.all();
 stmt.finalize();
 console.log(repos);
 
-repos.map(async (repo) => {
+const deps = [];
+const repoMetadata = [];
+const urlDeps = [];
+
+await Promise.all(repos.map(async (repo) => {
   const url = zigBuildURLMake(repo.full_name, repo.default_branch, "zon");
   const res = await zigBuildFetch(url);
   if (res.status === 200 || res.status === 404) {
@@ -1261,29 +1297,44 @@ repos.map(async (repo) => {
     }
   }
 
-  zigReposZonUpdate(db, {
+  repoMetadata.push({
     full_name: repo.full_name,
     min_zig_version: parsed?.minimum_zig_version,
     zonExists: res.status === 200,
     fetchedAt: res.fetchedAt,
   });
 
-  const URLDependencies = parsed?.dependencies
-    ? Object.entries(parsed.dependencies)
-      .map(([name, dep]) => {
-        if ("url" in dep && "hash" in dep) {
-          return {
-            name: name,
-            url: dep.url,
-            hash: dep.hash,
-          };
-        }
-        return null;
-      })
-      .filter(Boolean)
-    : [];
-  if (URLDependencies.length > 0) URLDependenciesInsert(db, URLDependencies);
-});
+  if (parsed?.dependencies) {
+    Object.entries(parsed.dependencies).forEach(([name, dep]) => {
+      if ("url" in dep && "hash" in dep) {
+        deps.push({
+          full_name: repo.full_name,
+          name: name,
+          dependency_type: "url",
+          path: null,
+          url_dependency_hash: dep.hash,
+        });
+        urlDeps.push({
+          name: name,
+          url: dep.url,
+          hash: dep.hash,
+        });
+      } else if ("path" in dep) {
+        deps.push({
+          full_name: repo.full_name,
+          name: name,
+          dependency_type: "path",
+          path: dep.path,
+          url_dependency_hash: null,
+        });
+      }
+    });
+  }
+}));
+
+zigReposZonUpdate(db, repoMetadata);
+zigRepoDependenciesInsert(db, deps);
+urlDependenciesInsert(db, urlDeps);
 
 // const urls = repos.map((repo) =>
 //   zigBuildURLMake(repo.full_name, repo.default_branch, "zon")
