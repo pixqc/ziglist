@@ -167,7 +167,7 @@ function zon2json(zon) {
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-const db = new Database("db.sqlite");
+const db = new Database("from-fly.sqlite");
 
 /**
  * @param {Database} innerDB
@@ -488,10 +488,8 @@ const RepoDetail = ({ kind, value }) => (
   <div className="flex">
     <span className="text-sm text-stone-500 dark:text-stone-400">{kind}</span>
     <div className="flex-grow flex flex-col px-3">
-      <div className="h-1/2 border-b border-stone-200 dark:border-stone-700">
-      </div>
-      <div className="h-1/2 border-t border-stone-200 dark:border-stone-700">
-      </div>
+      <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
+      <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
     </div>
     <span className="text-sm text-stone-500 dark:text-stone-400">{value}</span>
   </div>
@@ -656,10 +654,8 @@ const Navigation = ({ currentPath }) => {
       </a>
 
       <div className="flex-grow flex flex-col">
-        <div className="h-1/2 border-b border-stone-100 dark:border-stone-800">
-        </div>
-        <div className="h-1/2 border-t border-stone-100 dark:border-stone-800">
-        </div>
+        <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
+        <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
       </div>
     </div>
   );
@@ -699,10 +695,8 @@ const Pagination = ({ currentPath, page }) => {
 const Footer = () => (
   <div className="flex max-w-4xl mx-auto px-3 mb-6 space-x-4 items-center">
     <div className="flex-grow flex flex-col">
-      <div className="h-1/2 border-b border-stone-100 dark:border-stone-800">
-      </div>
-      <div className="h-1/2 border-t border-stone-100 dark:border-stone-800">
-      </div>
+      <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
+      <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
     </div>
     <p className="text-stone-400 dark:text-stone-500 text-sm">
       ziglist.org by{"  "}
@@ -750,8 +744,8 @@ const DependencyList = ({ deps }) => {
   return (
     <div>
       {deps.map((repo, index) => (
-        <div key={index} className="mb-6">
-          <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1">
+        <div key={index} className="mb-6 flex flex-col space-y-0">
+          <h3 className="font-semibold text-stone-900 dark:text-stone-100">
             <a
               href={`https://github.com/${repo.full_name}`}
               target="_blank"
@@ -759,26 +753,31 @@ const DependencyList = ({ deps }) => {
               className="hover:underline"
             >
               {repo.full_name}
-            </a>{" "}
-            <span className="font-normal text-sm text-stone-400 dark:text-stone-500">
-              depends on
-            </span>
+            </a>
+            {" "}
           </h3>
+          <span className="font-normal text-sm text-stone-300 dark:text-stone-600">
+            dependencies
+          </span>
           <ul className="list-none p-0 m-0">
             {repo.dependencies.map((dep, depIndex) => (
               <li
                 key={depIndex}
-                className="text-sm text-stone-700 dark:text-stone-300 mb-0.5"
+                className="text-sm text-stone-700 dark:text-stone-300 flex items-start"
               >
-                {dep.name}{" "}
+                <span className="flex-shrink-0 mr-2">{dep.name}</span>
+                <div className="flex-grow flex flex-col px-3 pt-2.5 min-w-20">
+                  <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
+                  <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
+                </div>
                 {dep.type === "url" && (
-                  <span className="text-xs text-stone-400 dark:text-stone-500 break-all">
+                  <span className="text-sm text-stone-400 dark:text-stone-500 break-all text-right">
                     {dep.url}
                   </span>
                 )}
                 {dep.type === "path" && (
-                  <span className="text-xs text-stone-400 dark:text-stone-500">
-                    {dep.path}
+                  <span className="text-sm text-stone-400 dark:text-stone-500">
+                    [path] {dep.path}
                   </span>
                 )}
               </li>
@@ -1432,9 +1431,9 @@ const backupInterval = setInterval(async () => {
 // ----------------------------------------------------------------------------
 // flags
 // this part could be better...
-//
-// if (IS_DEV) {
-//   clearInterval(backupInterval);
-//   clearInterval(zigReposInterval);
-//   clearInterval(zonFetchInterval);
-// }
+
+if (IS_DEV) {
+  clearInterval(backupInterval);
+  clearInterval(zigReposInterval);
+  clearInterval(zonFetchInterval);
+}
