@@ -17,6 +17,8 @@ const SECONDLY = 1000;
 const MINUTELY = 60 * SECONDLY;
 const HOURLY = 60 * MINUTELY;
 const DAILY = 24 * HOURLY;
+// ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
+const ZIG_INITIAL_COMMIT = new Date("2015-07-04");
 
 /**
  * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
@@ -84,12 +86,14 @@ setInterval(() => {
  * @param {Object} [data] - Additional data to log (optional).
  */
 const fatal = (message, data) => {
-  // TODO: should upload logs to R2
   logger.fatal(message, data);
-  logger.flush().then(() => {
-    Deno.exit(1);
-  });
+  Deno.exit(1);
 };
+
+addEventListener("unload", () => {
+  // TODO: should upload logs to R2
+  logger.flush();
+});
 
 /**
  * @param {number} unixSecond
@@ -155,7 +159,7 @@ const setEqual = (set1, set2) => {
  *
  * @param {string} zon - The contents of the zon file.
  */
-function zon2json(zon) {
+const zon2json = (zon) => {
   return zon
     .replace(/(?<!:)\/\/.*$/gm, "") // Remove comments
     .replace(/\.\{""}/g, ".{}") // Handle empty objects
@@ -164,11 +168,21 @@ function zon2json(zon) {
     .replace(/\.(\w+)\s*=\s*/g, '"$1": ') // Handle .key = value
     .replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]") // Convert paths to array
     .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
-    .replace(/"url"\s*:\s*"([^"]+)"/g, function (_, p1) {
+    .replace(/"url"\s*:\s*"([^"]+)"/g, (_, p1) => {
       // Special handling for URL to preserve '?' and '#'
       return `"url": "${p1.replace(/"/g, '\\"')}"`;
     });
-}
+};
+
+/**
+ * @param {Date} date
+ * @param {number} weeks
+ * @returns {Date}
+ */
+const addWeeks = (date, weeks) => {
+  const millisecondsPerWeek = 7 * 24 * 60 * 60 * 1000;
+  return new Date(date.getTime() + weeks * millisecondsPerWeek);
+};
 
 // ----------------------------------------------------------------------------
 // inits and healthchecks
@@ -949,6 +963,12 @@ Deno.serve({ port: 8080 }, app.fetch);
 // ----------------------------------------------------------------------------
 // indexer
 
+/**
+ * const url = "https://api.github.com/search/repositories?q=language%3Azig&per_page=100&page=1"
+ * const response = await fetch(url)
+ * const data = await response.json()
+ * const parsed = data.items.map(SchemaRepo.parse)
+ */
 const SchemaRepo = z.object({
   name: z.string(),
   full_name: z.string(),
@@ -1030,11 +1050,37 @@ const zigReposInsert = (innerDB, parsed) => {
   }
 };
 
+// value should be toggled and set throughout the program runtime
+let currentWeekIncrIdx = 0;
+
 /**
  * @param {'top' | 'new' | 'all'} type
  * @returns {string}
  */
 const zigReposURLMake = (type) => {
+  // TODO: explain 'all' type
+  const weekIncrements = [
+    113,
+    75,
+    48,
+    32,
+    28,
+    21,
+    20,
+    17,
+    15,
+    16,
+    14,
+    12,
+    10,
+    9,
+    9,
+    7,
+    8,
+    7,
+    6,
+  ];
+
   const base = "https://api.github.com/search/repositories";
   let query;
   if (type === "top") {
@@ -1045,15 +1091,15 @@ const zigReposURLMake = (type) => {
     const dateRange = makeDateRange(start, end);
     query = `in:name,description,topics zig created:${dateRange}`;
   } else if (type === "all") {
-    const res = db.prepare("SELECT MIN(created_at) FROM zig_repos").get();
-    const minCreatedAt = res && "MIN(created_at)" in res
-      ? res["MIN(created_at)"]
-      : null;
-    const end = minCreatedAt
-      ? new Date(Number(minCreatedAt) * 1000)
-      : new Date();
-    const start = new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const dateRange = makeDateRange(start, end);
+    const startDate = currentWeekIncrIdx === 0 ? ZIG_INITIAL_COMMIT : addWeeks(
+      ZIG_INITIAL_COMMIT,
+      weekIncrements.slice(0, currentWeekIncrIdx).reduce((a, b) => a + b, 0),
+    );
+    const endDate = addWeeks(startDate, weekIncrements[currentWeekIncrIdx]);
+    const dateRange = makeDateRange(startDate, endDate);
+    currentWeekIncrIdx === weekIncrements.length - 1
+      ? currentWeekIncrIdx = 0
+      : currentWeekIncrIdx += 1;
     query = `in:name,description,topics zig created:${dateRange}`;
   } else {
     logger.error(`zigReposURLMake - invalid type: ${type}`);
@@ -1075,7 +1121,7 @@ const zigReposURLMake = (type) => {
  * }>}
  */
 const zigReposFetch = async (url) => {
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: githubHeaders });
   let next;
   const linkHeader = response.headers.get("link");
   if (linkHeader) {
@@ -1092,16 +1138,19 @@ const zigReposFetch = async (url) => {
   };
 };
 
-// TODO: robust fetching strategy
-
-setInterval(async () => {
+/**
+ * @param {'top' | 'all' | 'new'} type
+ * @returns {Promise<void>}
+ */
+const zigReposFetchInsert = async (type) => {
   /** @type {string | undefined} */
-  let url = zigReposURLMake("all");
+  let url = zigReposURLMake(type);
   const parsed = [];
 
   while (url) {
+    logger.info(`zigReposFetch all fetching - ${url}`);
     const res = await zigReposFetch(url);
-    logger.info(`zigReposFetch top - status ${res.status} - ${url}`);
+    logger.info(`zigReposFetch all - status ${res.status} - ${url}`);
     for (const item of res.items) {
       try {
         const parsedItem = SchemaRepo.parse(item);
@@ -1117,7 +1166,10 @@ setInterval(async () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   zigReposInsert(db, parsed);
-}, MINUTELY);
+};
+
+zigReposFetchInsert("top");
+setInterval(() => zigReposFetchInsert("all"), MINUTELY);
 
 const SchemaZon = z.object({
   name: z.string(),
@@ -1260,6 +1312,8 @@ setInterval(async () => {
     SELECT full_name, default_branch
     FROM zig_repos
     WHERE build_zig_zon_fetched_at IS NULL
+      AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND description NOT LIKE '%zigbee%' COLLATE NOCASE
     LIMIT 13;`);
 
   const repos = stmt.all();
@@ -1329,9 +1383,9 @@ setInterval(async () => {
     }
   }));
 
-  zigReposZonUpdate(db, repoMetadata);
-  urlDependenciesInsert(db, urlDeps);
-  zigRepoDependenciesInsert(db, deps);
+  if (repoMetadata.length > 0) zigReposZonUpdate(db, repoMetadata);
+  if (urlDeps.length > 0) urlDependenciesInsert(db, urlDeps);
+  if (deps.length > 0) zigRepoDependenciesInsert(db, deps);
 }, SECONDLY * 10);
 
 // ----------------------------------------------------------------------------
