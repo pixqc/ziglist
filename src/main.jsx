@@ -184,6 +184,16 @@ const addWeeks = (date, weeks) => {
   return new Date(date.getTime() + weeks * millisecondsPerWeek);
 };
 
+/**
+ * @param {Date} date
+ * @param {number} months
+ * @returns {Date}
+ */
+const addMonths = (date, months) => {
+  const millisecondsPerMonth = 30 * 24 * 60 * 60 * 1000;
+  return new Date(date.getTime() + months * millisecondsPerMonth);
+};
+
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
@@ -1050,61 +1060,75 @@ const zigReposInsert = (innerDB, parsed) => {
   }
 };
 
-// value should be toggled and set throughout the program runtime
-let currentWeekIncrIdx = 0;
+let monthsAfterLast = 0;
+let currentWeekIncrementIndex = 0;
 
 /**
- * @param {'top' | 'new' | 'all'} type
+ * @param {'top' | 'all'} type
  * @returns {string}
  */
 const zigReposURLMake = (type) => {
-  // TODO: explain 'all' type
-  const weekIncrements = [
-    113,
-    75,
-    48,
-    32,
-    28,
-    21,
-    20,
-    17,
-    15,
-    16,
-    14,
-    12,
-    10,
-    9,
-    9,
-    7,
-    8,
-    7,
-    6,
-  ];
-
   const base = "https://api.github.com/search/repositories";
   let query;
   if (type === "top") {
     query = "language:zig";
-  } else if (type === "new") {
-    const end = new Date();
-    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-    const dateRange = makeDateRange(start, end);
-    query = `in:name,description,topics zig created:${dateRange}`;
   } else if (type === "all") {
-    const startDate = currentWeekIncrIdx === 0 ? ZIG_INITIAL_COMMIT : addWeeks(
+    const weeksSinceInitialCommit = [
+      113,
+      188,
+      236,
+      268,
+      295,
+      317,
+      337,
+      354,
+      369,
+      385,
+      399,
+      411,
+      421,
+      430,
+      439,
+      446,
+      454,
+      461,
+      467,
+    ];
+    const last = addWeeks(
       ZIG_INITIAL_COMMIT,
-      weekIncrements.slice(0, currentWeekIncrIdx).reduce((a, b) => a + b, 0),
+      weeksSinceInitialCommit[weeksSinceInitialCommit.length - 1],
     );
-    const endDate = addWeeks(startDate, weekIncrements[currentWeekIncrIdx]);
-    const dateRange = makeDateRange(startDate, endDate);
-    currentWeekIncrIdx === weekIncrements.length - 1
-      ? currentWeekIncrIdx = 0
-      : currentWeekIncrIdx += 1;
-    query = `in:name,description,topics zig created:${dateRange}`;
+
+    if (currentWeekIncrementIndex < weeksSinceInitialCommit.length) {
+      const start = currentWeekIncrementIndex === 0
+        ? ZIG_INITIAL_COMMIT
+        : addWeeks(
+          ZIG_INITIAL_COMMIT,
+          weeksSinceInitialCommit[currentWeekIncrementIndex - 1],
+        );
+      const end = addWeeks(
+        ZIG_INITIAL_COMMIT,
+        weeksSinceInitialCommit[currentWeekIncrementIndex],
+      );
+      const dateRange = makeDateRange(start, end);
+      currentWeekIncrementIndex++;
+      query = `in:name,description,topics zig created:${dateRange}`;
+    } else {
+      const start = addMonths(last, monthsAfterLast);
+      const end = addMonths(last, monthsAfterLast + 1);
+      monthsAfterLast += 1;
+      if (end > new Date()) {
+        currentWeekIncrementIndex = 0;
+        monthsAfterLast = 0;
+      }
+      const dateRange = makeDateRange(start, end);
+      query = `in:name,description,topics zig created:${dateRange}`;
+    }
   } else {
     logger.error(`zigReposURLMake - invalid type: ${type}`);
     fatal(`zigReposURLMake - invalid type ${typeof type}`);
   }
+
   // @ts-ignore - query is always defined
   const encodedQuery = encodeURIComponent(query);
   return `${base}?q=${encodedQuery}&per_page=100&page=1`;
@@ -1139,7 +1163,7 @@ const zigReposFetch = async (url) => {
 };
 
 /**
- * @param {'top' | 'all' | 'new'} type
+ * @param {'top' | 'all'} type
  * @returns {Promise<void>}
  */
 const zigReposFetchInsert = async (type) => {
@@ -1148,9 +1172,8 @@ const zigReposFetchInsert = async (type) => {
   const parsed = [];
 
   while (url) {
-    logger.info(`zigReposFetch all fetching - ${url}`);
     const res = await zigReposFetch(url);
-    logger.info(`zigReposFetch all - status ${res.status} - ${url}`);
+    logger.info(`zigReposFetch - status ${res.status} - ${url}`);
     for (const item of res.items) {
       try {
         const parsedItem = SchemaRepo.parse(item);
