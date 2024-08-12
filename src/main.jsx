@@ -453,6 +453,9 @@ const RepoCard = ({ repo }) => {
       <div className="flex flex-wrap gap-1 mb-1">
         {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
+        {repo.build_zig_exists === 1 && repo.language !== "Zig" && (
+          <Badge value={`lang:${repo.language}`} />
+        )}
       </div>
       {repo.dependencies && repo.dependencies.length > 0 && (
         <div className="flex flex-wrap gap-1 items-center">
@@ -1417,6 +1420,11 @@ const excludedRepos = [
   "jeedom-zigate/jeedom-plugin-zigate",
 ];
 
+// some c/cpp projects use build.zig but doesn't mention zig in description
+const includedRepos = [
+  "ggerganov/ggml",
+];
+
 const logger = createLogger();
 setInterval(() => {
   logger.flush();
@@ -1445,6 +1453,14 @@ if (IS_PROD) {
 
 const db = new Database("db.sqlite");
 initDatabase(db);
+
+includedRepos.forEach(async (repo) => {
+  const url = `https://api.github.com/repos/${repo}`;
+  const response = await fetch(url, { headers: githubHeaders });
+  const data = await response.json();
+  const parsed = SchemaRepo.parse(data);
+  zigReposInsert(db, [parsed]);
+});
 
 // should crash if any of the healthchecks fail
 healthcheckGithub();
