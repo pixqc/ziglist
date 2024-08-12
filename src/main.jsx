@@ -1349,7 +1349,7 @@ const backup = async () => {
     const backupDB = new Database("./backup.sqlite");
     db.backup(backupDB);
     backupDB.close();
-    Deno.copyFile("./log.txt", "./log-backup.txt");
+    await Deno.copyFile("./log.txt", "./log-backup.txt");
     logger.info("backed up db and log.txt locally");
   } catch (e) {
     logger.error(`error backing up db and log.txt: ${e}`);
