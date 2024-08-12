@@ -5,10 +5,7 @@ import { z } from "zod";
 import { S3Client } from "s3";
 
 // TODO:
-// - fetch build.zig; filter out projects without build.zig
 // - on first boot: fetch database from r2, use as db
-// - reliable indexer
-//   use etag and last-modified for checking pushed_at
 
 // ----------------------------------------------------------------------------
 // utils
@@ -137,15 +134,6 @@ const formatNumberK = (num) => {
  */
 const makeDateRange = (start, end) =>
   `${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
-
-/**
- * @param {Set<any>} set1
- * @param {Set<any>} set2
- * @returns {boolean}
- */
-const setEqual = (set1, set2) => {
-  return set1.size === set2.size && [...set1].every((item) => set2.has(item));
-};
 
 /**
  * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
@@ -349,59 +337,6 @@ const healthcheckDatabase = () => {
     fatal(`healthcheck - database is not working: ${e}`);
   }
 };
-
-// const healthcheckGithubFetch = async () => {
-//   const dummyDB = new Database("./test-db.sqlite");
-//   initDatabase(dummyDB);
-//
-//   const base = "https://api.github.com/search/repositories";
-//   const query = `language:zig`;
-//   const encodedQuery = encodeURIComponent(query);
-//   const url = `${base}?q=${encodedQuery}&per_page=50&page=1`;
-//   const response = await fetch(url, { headers: githubHeaders });
-//
-//   const data = await response.json();
-//   const items = data.items.filter(Boolean);
-//   const parsed = [];
-//   for (const item of items) {
-//     try {
-//       const parsedItem = SchemaRepo.parse(item);
-//       parsed.push(parsedItem);
-//     } catch (e) {
-//       logger.error("healthcheck - error parsing repos", {
-//         fullName: item.full_name,
-//         error: e,
-//       });
-//     }
-//   }
-//
-//   if (parsed.length === 0) fatal("healthcheck - no repos fetched from GitHub");
-//   const repos = parsed.map((item) => {
-//     return { fullName: item.full_name, defaultBranch: item.default_branch };
-//   });
-//
-//   const zons = await Promise.all(repos.map(fetchZon));
-//
-//   zigReposInsert(dummyDB, parsed);
-//   dependenciesInsert(dummyDB, zons);
-//
-//   const q1 = dummyDB.prepare(`
-//     SELECT full_name
-//     FROM zig_repos
-//   `);
-//   const r1 = q1.all().map((row) => row.full_name);
-//   q1.finalize();
-//   const s1 = new Set(r1);
-//   const s1Parsed = new Set(parsed.map((item) => item.full_name));
-//   console.log(s1);
-//   console.log(s1Parsed);
-//   if (!setEqual(s1, s1Parsed)) fatal("healthcheck - zig_repos mismatch");
-//
-//   // set of url hashes
-//
-//   // @ts-ignore - lmao who cares
-//   // const deps = zons.flatMap((zon) => zon.parsed?.dependencies).filter(Boolean);
-// };
 
 let tailwindcss = "";
 const healthcheckTailwind = () => {
@@ -1500,7 +1435,6 @@ initDatabase(db);
 // should crash if any of the healthchecks fail
 healthcheckGithub();
 healthcheckDatabase();
-// healthcheckGithubFetch();
 if (IS_PROD) healthcheckR2();
 healthcheckTailwind();
 
