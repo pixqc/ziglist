@@ -13,10 +13,6 @@ import { S3Client } from "s3";
 // ----------------------------------------------------------------------------
 // utils
 
-const SECONDLY = 1000;
-const MINUTELY = 60 * SECONDLY;
-const HOURLY = 60 * MINUTELY;
-const DAILY = 24 * HOURLY;
 // ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
 const ZIG_INITIAL_COMMIT = new Date("2015-07-04");
 
@@ -73,9 +69,6 @@ const createLogger = () => {
 };
 
 const logger = createLogger();
-setInterval(() => {
-  logger.flush();
-}, SECONDLY * 10);
 
 /**
  * A wise man once said:
@@ -255,6 +248,15 @@ const initDatabase = (innerDB) => {
     innerDB.exec(`
       INSERT OR IGNORE INTO zig_repo_dependencies (full_name, name, dependency_type, path)
       VALUES
+        ('NilsIrl/dockerc', 'argp-standalone', 'path', 'argp-standalone'),
+        ('NilsIrl/dockerc', 'crun', 'path', 'crun'),
+        ('NilsIrl/dockerc', 'fuse-overlayfs', 'path', 'fuse-overlayfs'),
+        ('NilsIrl/dockerc', 'libfuse', 'path', 'libfuse'),
+        ('NilsIrl/dockerc', 'skopeo', 'path', 'skopeo'),
+        ('NilsIrl/dockerc', 'squashfs-tools', 'path', 'squashfs-tools'),
+        ('NilsIrl/dockerc', 'squashfuse', 'path', 'squashfuse'),
+        ('NilsIrl/dockerc', 'umoci', 'path', 'umoci'),
+        ('NilsIrl/dockerc', 'zstd', 'path', 'zstd'),
         ('zigzap/zap', 'facil.io', 'path', 'facil.io'),
         ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
         ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
@@ -442,15 +444,6 @@ const healthcheckR2 = () => {
     });
 };
 
-initDatabase(db);
-
-// should crash if any of the healthchecks fail
-healthcheckGithub();
-healthcheckDatabase();
-// healthcheckGithubFetch();
-if (IS_PROD) healthcheckR2();
-healthcheckTailwind();
-
 // ----------------------------------------------------------------------------
 // jsx components
 // note: this is not a React application, jsx is only for templating
@@ -568,13 +561,13 @@ const RepoCard = ({ repo }) => {
       )}
       <div className="flex-grow"></div>
       {repo.dependencies && repo.dependencies.length > 0 && (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1 items-center">
           <span className="text-sm text-stone-500 dark:text-stone-400">
             Deps:
           </span>
           {repo.dependencies.slice(0, 5).map((dep) => <Badge value={dep} />)}
           {repo.dependencies.length > 5 && (
-            <span className="text-sm text-stone-500 dark:text-stone-400">
+            <span className="text-xs text-stone-500 dark:text-stone-400">
               +{repo.dependencies.length - 5} more
             </span>
           )}
@@ -971,10 +964,6 @@ const Page404 = () => (
 app.notFound((c) => {
   return c.html(<Page404 />, 404);
 });
-
-const port = 8080;
-logger.info(`listening on http://localhost:${port}`);
-Deno.serve({ port: 8080 }, app.fetch);
 
 // ----------------------------------------------------------------------------
 // indexer
@@ -1495,7 +1484,28 @@ const backup = async () => {
   }
 };
 
-zigReposFetchInsert("top");
-Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-Deno.cron("backup", "0 */3 * * *", backup);
+// ----------------------------------------------------------------------------
+// main
+
+setInterval(() => {
+  logger.flush();
+}, 1000 * 10);
+
+initDatabase(db);
+
+// should crash if any of the healthchecks fail
+healthcheckGithub();
+healthcheckDatabase();
+// healthcheckGithubFetch();
+if (IS_PROD) healthcheckR2();
+healthcheckTailwind();
+
+const port = 8080;
+logger.info(`listening on http://localhost:${port}`);
+Deno.serve({ port: 8080 }, app.fetch);
+
+// zigReposFetchInsert("top");
+zigBuildFetchInsert();
+// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+// Deno.cron("backup", "0 */3 * * *", backup);
