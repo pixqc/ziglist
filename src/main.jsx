@@ -455,13 +455,14 @@ const RepoCard = ({ repo }) => {
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
       </div>
       {repo.dependencies && repo.dependencies.length > 0 && (
-        <div className="flex flex-wrap gap-1 items-center mb-1">
+        <div className="flex flex-wrap gap-1 items-center">
           <span className="text-sm text-stone-500 dark:text-stone-400">
             Deps:
           </span>
           {repo.dependencies.slice(0, 3).map((dep) => <Badge value={dep} />)}
           {repo.dependencies.length > 3 && (
             <span className="text-xs text-stone-500 dark:text-stone-400">
+              { /* might be orphaned at it looks bad */}
               +{repo.dependencies.length - 3} more
             </span>
           )}
@@ -505,7 +506,7 @@ const Hero = () => (
 
 const Header = () => (
   <header className="sticky top-0 z-10 bg-white/40 dark:bg-stone-900/40 backdrop-blur-xl">
-    <div className="max-w-4xl mx-auto p-3 flex items-center justify-between">
+    <div className="max-w-5xl mx-auto p-3 flex items-center justify-between">
       <a
         href="/"
         className="text-lg font-bold text-stone-900 dark:text-stone-100 tracking-tighter"
@@ -535,7 +536,7 @@ const Navigation = ({ currentPath }) => {
     "hover:text-stone-900 dark:hover:text-stone-100 transition-colors";
 
   return (
-    <div className="max-w-4xl mx-auto px-3 flex space-x-4">
+    <div className="max-w-5xl mx-auto px-3 flex space-x-4">
       <a
         href="/"
         className={`${linkStyle} ${
@@ -609,7 +610,7 @@ const Pagination = ({ currentPath, page }) => {
 };
 
 const Footer = () => (
-  <div className="flex max-w-4xl mx-auto px-3 mb-6 space-x-4 items-center">
+  <div className="flex max-w-5xl mx-auto px-3 mb-6 space-x-4 items-center">
     <div className="flex-grow flex flex-col">
       <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
       <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
@@ -642,7 +643,7 @@ const BaseLayout = ({ children, currentPath, page }) => (
         <Header />
         <Hero />
         <Navigation currentPath={currentPath} />
-        <div className="max-w-4xl mx-auto px-3 py-6">
+        <div className="max-w-5xl mx-auto px-3 py-6">
           <div>
             {children}
           </div>
@@ -1393,6 +1394,7 @@ logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 const sqliteBackup = "backup-2024-08-12T06:00:00.002Z.sqlite";
 
+// considered R2 healthcheck, crash on db restore failure
 if (IS_PROD) {
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
