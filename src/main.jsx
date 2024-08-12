@@ -10,9 +10,6 @@ import { S3Client } from "s3";
 // ----------------------------------------------------------------------------
 // utils
 
-// ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
-const ZIG_INITIAL_COMMIT = new Date("2015-07-04");
-
 /**
  * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
  *
@@ -64,8 +61,6 @@ const createLogger = () => {
     },
   };
 };
-
-const logger = createLogger();
 
 /**
  * A wise man once said:
@@ -178,8 +173,6 @@ const addMonths = (date, months) => {
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-const db = new Database("db.sqlite");
-
 /**
  * @param {Database} innerDB
  * @returns {void}
@@ -287,10 +280,6 @@ const initDatabase = (innerDB) => {
     innerDB.exec("PRAGMA foreign_keys = ON;");
   }
 };
-
-const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
-const IS_DEV = !IS_PROD;
-logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
 const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -1009,6 +998,8 @@ const zigReposInsert = (innerDB, parsed) => {
   }
 };
 
+// ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
+const ZIG_INITIAL_COMMIT = new Date("2015-07-04");
 let monthsAfterLast = 0;
 let currentWeekIncrementIndex = 0;
 
@@ -1084,8 +1075,6 @@ const zigReposURLMake = (type) => {
 };
 
 /**
- * Fetches repository data from a GitHub API endpoint and handles pagination.
- *
  * @param {string} url - The GitHub API endpoint URL to fetch from.
  * @returns {Promise<{
  *   status: number,
@@ -1301,6 +1290,7 @@ const zigBuildFetchInsert = async () => {
     WHERE build_zig_zon_fetched_at IS NULL
       AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND (description IS NULL OR description NOT LIKE '%zigbee%' COLLATE NOCASE)
+    ORDER BY stars DESC
     LIMIT 41;`);
 
   const repos = stmt.all();
@@ -1426,17 +1416,40 @@ const backup = async () => {
 // ----------------------------------------------------------------------------
 // main
 
+const logger = createLogger();
 setInterval(() => {
   logger.flush();
 }, 1000 * 10);
 
+const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
+const IS_DEV = !IS_PROD;
+logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
+
+const sqliteBackup = "backup-2024-08-12T06:00:00.002Z.sqlite";
+
+if (IS_PROD) {
+  try {
+    const resultR2 = await R2.getObject(sqliteBackup);
+    const localOutFile = await Deno.open("db.sqlite", {
+      write: true,
+      createNew: true,
+    });
+    await resultR2.body?.pipeTo(localOutFile.writable);
+    localOutFile.close();
+    logger.info("restored db from R2");
+  } catch (e) {
+    logger.error(`fetching and writing backup to local file: ${e}`);
+  }
+}
+
+const db = new Database("db.sqlite");
 initDatabase(db);
 
 // should crash if any of the healthchecks fail
 healthcheckGithub();
-healthcheckDatabase();
 if (IS_PROD) healthcheckR2();
 healthcheckTailwind();
+healthcheckDatabase();
 
 const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
