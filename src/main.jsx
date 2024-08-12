@@ -197,7 +197,7 @@ const addMonths = (date, months) => {
 // ----------------------------------------------------------------------------
 // inits and healthchecks
 
-const db = new Database("db2.sqlite");
+const db = new Database("db.sqlite");
 
 /**
  * @param {Database} innerDB
@@ -1212,9 +1212,6 @@ const zigReposFetchInsert = async (type) => {
   zigReposInsert(db, parsed);
 };
 
-zigReposFetchInsert("top");
-// Deno.cron("zigReposFetchInsert('all')", "* * * * *", () => zigReposFetchInsert("all"));
-
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -1233,10 +1230,16 @@ const SchemaZon = z.object({
   ])).optional(),
 });
 
+/**
+ * @param {Database} innerDB
+ * @param {Object[]} parsed
+ */
 const zigReposZonUpdate = (innerDB, parsed) => {
   const stmt = innerDB.prepare(`
     UPDATE zig_repos
     SET min_zig_version = ?,
+        build_zig_exists = ?,
+        build_zig_fetched_at = ?,
         build_zig_zon_exists = ?,
         build_zig_zon_fetched_at = ?
     WHERE full_name = ?
@@ -1247,6 +1250,8 @@ const zigReposZonUpdate = (innerDB, parsed) => {
       for (const row of data) {
         stmt.run(
           row.min_zig_version ?? null,
+          row.buildZigExists,
+          row.fetchedAt,
           row.zonExists,
           row.fetchedAt,
           row.full_name,
@@ -1341,6 +1346,14 @@ const zigBuildURLMake = (full_name, default_branch, type) => {
   return url;
 };
 
+/**
+ * @param {string} url
+ * @returns {Promise<{
+ *  status: number,
+ *  fetchedAt: number,
+ *  content: string,
+ *  }>}
+ */
 const zigBuildFetch = async (url) => {
   const response = await fetch(url);
   const fetchedAt = Math.floor(Date.now() / 1000);
@@ -1353,13 +1366,14 @@ const zigBuildFetch = async (url) => {
 
 const zigBuildFetchInsert = async () => {
   // rate limit: 5000 requests per hour, 83/min
+  // 41 because fetching both build.zig and build.zig.zon, 41 * 2 = 82
   const stmt = db.prepare(`
     SELECT full_name, default_branch
     FROM zig_repos
     WHERE build_zig_zon_fetched_at IS NULL
       AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND description NOT LIKE '%zigbee%' COLLATE NOCASE
-    LIMIT 83;`);
+    LIMIT 41;`);
 
   const repos = stmt.all();
   stmt.finalize();
@@ -1367,8 +1381,19 @@ const zigBuildFetchInsert = async () => {
   const deps = [];
   const repoMetadata = [];
   const urlDeps = [];
-
   await Promise.all(repos.map(async (repo) => {
+    const url1 = zigBuildURLMake(repo.full_name, repo.default_branch, "zig");
+    const res1 = await zigBuildFetch(url1);
+    if (res1.status === 200 || res1.status === 404) {
+      logger.info(
+        `build.zig fetch - status ${res1.status} - ${repo.full_name}`,
+      );
+    } else {
+      logger.warn(
+        `build.zig fetch - status ${res1.status} - ${repo.full_name}`,
+      );
+    }
+
     const url = zigBuildURLMake(repo.full_name, repo.default_branch, "zon");
     const res = await zigBuildFetch(url);
     if (res.status === 200 || res.status === 404) {
@@ -1397,6 +1422,7 @@ const zigBuildFetchInsert = async () => {
       full_name: repo.full_name,
       min_zig_version: parsed?.minimum_zig_version,
       zonExists: res.status === 200,
+      buildZigExists: res1.status === 200,
       fetchedAt: res.fetchedAt,
     });
 
@@ -1433,53 +1459,43 @@ const zigBuildFetchInsert = async () => {
   if (deps.length > 0) zigRepoDependenciesInsert(db, deps);
 };
 
+const backup = async () => {
+  const timestamp = new Date().toISOString();
+  try {
+    const backupDB = new Database("./backup.sqlite");
+    db.backup(backupDB);
+    backupDB.close();
+    Deno.copyFile("./log.txt", "./log-backup.txt");
+    logger.info("backed up db and log.txt locally");
+  } catch (e) {
+    logger.error(`error backing up db and log.txt: ${e}`);
+  }
+
+  try {
+    const f1 = await Deno.readFile("./backup.sqlite");
+    await R2.putObject(`backup-${timestamp}.sqlite`, f1, {
+      metadata: { "Content-Type": "application/x-sqlite3" },
+    });
+    const f2 = await Deno.readFile("./log-backup.txt");
+    await R2.putObject(`log-${timestamp}.txt`, f2, {
+      metadata: { "Content-Type": "text/plain" },
+    });
+
+    logger.info("backed up db and log.txt to R2");
+  } catch (e) {
+    logger.error(`error backing up db and log.txt to R2: ${e}`);
+  }
+
+  try {
+    await Deno.remove("./backup.sqlite");
+    await Deno.remove("./log-backup.txt");
+    logger.info("cleaned up backup files");
+  } catch (e) {
+    logger.error(`error cleaning up backup files: ${e}`);
+  }
+};
+
+zigReposFetchInsert("top");
+Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-
-// // ----------------------------------------------------------------------------
-// // backup db and log.txt
-//
-// const backupInterval = setInterval(async () => {
-//   const timestamp = new Date().toISOString();
-//   try {
-//     const backupDB = new Database("./backup.sqlite");
-//     db.backup(backupDB);
-//     backupDB.close();
-//     Deno.copyFile("./log.txt", "./log-backup.txt");
-//     logger.info("backed up db and log.txt locally");
-//   } catch (e) {
-//     logger.error(`error backing up db and log.txt: ${e}`);
-//   }
-//
-//   try {
-//     const f1 = await Deno.readFile("./backup.sqlite");
-//     await R2.putObject(`backup-${timestamp}.sqlite`, f1, {
-//       metadata: { "Content-Type": "application/x-sqlite3" },
-//     });
-//     const f2 = await Deno.readFile("./log-backup.txt");
-//     await R2.putObject(`log-${timestamp}.txt`, f2, {
-//       metadata: { "Content-Type": "text/plain" },
-//     });
-//
-//     logger.info("backed up db and log.txt to R2");
-//   } catch (e) {
-//     logger.error(`error backing up db and log.txt to R2: ${e}`);
-//   }
-//
-//   try {
-//     await Deno.remove("./backup.sqlite");
-//     await Deno.remove("./log-backup.txt");
-//     logger.info("cleaned up backup files");
-//   } catch (e) {
-//     logger.error(`error cleaning up backup files: ${e}`);
-//   }
-// }, HOURLY * 3);
-
-// ----------------------------------------------------------------------------
-// flags
-// this part could be better...
-
-// if (IS_DEV) {
-//   clearInterval(backupInterval);
-//   clearInterval(zigReposInterval);
-//   clearInterval(zonFetchInterval);
-// }
+Deno.cron("backup", "0 */3 * * *", backup);
