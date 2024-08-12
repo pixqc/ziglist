@@ -462,7 +462,7 @@ const RepoCard = ({ repo }) => {
           {repo.dependencies.slice(0, 3).map((dep) => <Badge value={dep} />)}
           {repo.dependencies.length > 3 && (
             <span className="text-xs text-stone-500 dark:text-stone-400">
-              { /* might be orphaned at it looks bad */}
+              {/* might be orphaned at it looks bad */}
               +{repo.dependencies.length - 3} more
             </span>
           )}
@@ -730,11 +730,13 @@ app.get("/", (c) => {
     WHERE r.stars >= 10 AND r.forks >= 10
       AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND r.full_name NOT IN (${excludedRepos.map(() => "?").join(", ")})
     GROUP BY r.full_name
     ORDER BY r.pushed_at DESC
     LIMIT ? OFFSET ?
   `);
-  const repos = stmt.all(perPage, offset);
+
+  const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
 
   repos.forEach((repo) => {
@@ -763,11 +765,12 @@ app.get("/new", (c) => {
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
     WHERE r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND r.full_name NOT IN (${excludedRepos.map(() => "?").join(", ")})
     GROUP BY r.full_name
     ORDER BY r.created_at DESC
     LIMIT ? OFFSET ?
   `);
-  const repos = stmt.all(perPage, offset);
+  const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
 
   repos.forEach((repo) => {
@@ -797,11 +800,12 @@ app.get("/top", (c) => {
     WHERE r.forks >= 10
       AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND r.full_name NOT IN (${excludedRepos.map(() => "?").join(", ")})
     GROUP BY r.full_name
     ORDER BY r.stars DESC
     LIMIT ? OFFSET ?
   `);
-  const repos = stmt.all(perPage, offset);
+  const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
 
   repos.forEach((repo) => {
@@ -1382,6 +1386,36 @@ const backup = async () => {
 
 // ----------------------------------------------------------------------------
 // main
+
+// unrelated repos, but they have zig in their name/description
+const excludedRepos = [
+  "manwar/perlweeklychallenge-club",
+  "tighten/ziggy",
+  "zigpy/zigpy-cli",
+  "extism/extism",
+  "xyproto/orbiton",
+  "gojek/ziggurat",
+  "jinyus/related_post_gen",
+  "valdiney/zig",
+  "CompVis/zigma",
+  "Lisprez/so_stupid_search",
+  "mercenaruss/zigstar_gateways",
+  "zigpy/zigpy-znp",
+  "christianhujer/expensereport",
+  "beigirad/ZigzagView",
+  "5zig-reborn/The-5zig-Mod",
+  "KULeuven-MICAS/zigzag",
+  "5zig/The-5zig-Mod",
+  "zigi/zigi",
+  "zigpy/zigpy-cc",
+  "zigpy/zigpy-deconz",
+  "xyzroe/ZigStarGW-FW",
+  "doudz/zigate",
+  "doudz/homeassistant-zigate",
+  "ZigZag-Project/zigzag-v1",
+  "coderDarren/ZigZagClone",
+  "jeedom-zigate/jeedom-plugin-zigate",
+];
 
 const logger = createLogger();
 setInterval(() => {
