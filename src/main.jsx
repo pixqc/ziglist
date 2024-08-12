@@ -334,37 +334,6 @@ const healthcheckTailwind = () => {
   }
 };
 
-const healthcheckR2 = () => {
-  const timestamp = new Date().toISOString();
-  const opts = {
-    "metadata": { "Content-Type": "text/plain" },
-  };
-
-  let contents = "";
-  const writable = new WritableStream({
-    write(chunk) {
-      contents += new TextDecoder().decode(chunk);
-    },
-  });
-
-  R2.putObject("test.txt", timestamp, opts)
-    .then(() => R2.getObject("test.txt"))
-    .then((response) => {
-      return response.body?.pipeTo(writable)
-        .then(() => contents);
-    })
-    .then((contents) => {
-      if (contents !== timestamp) {
-        fatal("healthcheck - R2 put/get failed");
-      } else {
-        logger.info("healthcheck - R2 works fine");
-      }
-    })
-    .catch((error) => {
-      fatal(`healthcheck - R2 put/get failed: ${error}`);
-    });
-};
-
 // ----------------------------------------------------------------------------
 // jsx components
 // note: this is not a React application, jsx is only for templating
@@ -1432,9 +1401,9 @@ if (IS_PROD) {
       createNew: true,
     });
     await resultR2.body?.pipeTo(localOutFile.writable);
-    logger.info("restored db from R2");
+    logger.info("healthcheck - restored db from R2");
   } catch (e) {
-    logger.error(`fetching and writing backup to local file: ${e}`);
+    fatal(`healthcheck - failed to restore db from R2 ${e}`);
   }
 }
 
@@ -1443,7 +1412,6 @@ initDatabase(db);
 
 // should crash if any of the healthchecks fail
 healthcheckGithub();
-if (IS_PROD) healthcheckR2();
 healthcheckTailwind();
 healthcheckDatabase();
 
