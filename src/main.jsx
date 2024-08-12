@@ -4,9 +4,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { S3Client } from "s3";
 
-// TODO:
-// - on first boot: fetch database from r2, use as db
-
 // ----------------------------------------------------------------------------
 // utils
 
@@ -1428,14 +1425,13 @@ logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 const sqliteBackup = "backup-2024-08-12T06:00:00.002Z.sqlite";
 
 if (IS_PROD) {
+  const resultR2 = await R2.getObject(sqliteBackup);
   try {
-    const resultR2 = await R2.getObject(sqliteBackup);
     const localOutFile = await Deno.open("db.sqlite", {
       write: true,
       createNew: true,
     });
     await resultR2.body?.pipeTo(localOutFile.writable);
-    localOutFile.close();
     logger.info("restored db from R2");
   } catch (e) {
     logger.error(`fetching and writing backup to local file: ${e}`);
