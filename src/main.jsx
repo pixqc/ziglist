@@ -1361,7 +1361,7 @@ const zigBuildFetchInsert = async () => {
     FROM zig_repos
     WHERE build_zig_zon_fetched_at IS NULL
       AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-      AND description NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND (description IS NULL OR description NOT LIKE '%zigbee%' COLLATE NOCASE)
     LIMIT 41;`);
 
   const repos = stmt.all();
