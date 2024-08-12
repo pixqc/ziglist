@@ -560,15 +560,19 @@ const RepoCard = ({ repo }) => {
         </p>
       )}
       <div className="flex-grow"></div>
+      <div className="flex flex-wrap gap-1 mb-1">
+        {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
+        {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
+      </div>
       {repo.dependencies && repo.dependencies.length > 0 && (
-        <div className="flex flex-wrap gap-1 items-center">
+        <div className="flex flex-wrap gap-1 items-center mb-1">
           <span className="text-sm text-stone-500 dark:text-stone-400">
             Deps:
           </span>
-          {repo.dependencies.slice(0, 5).map((dep) => <Badge value={dep} />)}
-          {repo.dependencies.length > 5 && (
+          {repo.dependencies.slice(0, 3).map((dep) => <Badge value={dep} />)}
+          {repo.dependencies.length > 3 && (
             <span className="text-xs text-stone-500 dark:text-stone-400">
-              +{repo.dependencies.length - 5} more
+              +{repo.dependencies.length - 3} more
             </span>
           )}
         </div>
@@ -1504,8 +1508,8 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port: 8080 }, app.fetch);
 
-// zigReposFetchInsert("top");
+zigReposFetchInsert("top");
 zigBuildFetchInsert();
-// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-// Deno.cron("backup", "0 */3 * * *", backup);
+Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+Deno.cron("backup", "0 */3 * * *", backup);
