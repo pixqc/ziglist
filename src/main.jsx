@@ -58,10 +58,6 @@ const createLogger = () => {
     },
   };
 };
-const logger = createLogger();
-setInterval(() => {
-  logger.flush();
-}, 1000 * 10);
 
 /**
  * A wise man once said:
@@ -75,11 +71,6 @@ const fatal = (message, data) => {
   logger.fatal(message, data);
   Deno.exit(1);
 };
-
-addEventListener("unload", () => {
-  // TODO: should upload logs to R2
-  logger.flush();
-});
 
 /**
  * @param {number} unixSecond
@@ -134,7 +125,8 @@ const makeDateRange = (start, end) =>
 /**
  * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
  *
- * @param {string} zon - The contents of the zon file.
+ * @param {string} zon - raw zig struct (build.zig.zon)
+ * @returns {string} - string parseable by JSON.parse
  */
 const zon2json = (zon) => {
   return zon
@@ -169,173 +161,6 @@ const addWeeks = (date, weeks) => {
 const addMonths = (date, months) => {
   const millisecondsPerMonth = 30 * 24 * 60 * 60 * 1000;
   return new Date(date.getTime() + months * millisecondsPerMonth);
-};
-
-// ----------------------------------------------------------------------------
-// inits and healthchecks
-
-/**
- * @param {Database} innerDB
- * @returns {void}
- */
-const initDatabase = (innerDB) => {
-  innerDB.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS zig_repos (
-      full_name TEXT PRIMARY KEY,
-      name TEXT,
-      owner TEXT,
-      description TEXT NULL,
-      homepage TEXT NULL,
-      license TEXT NULL,
-      created_at INTEGER,
-      updated_at INTEGER,
-      pushed_at INTEGER,
-      stars INTEGER,
-      forks INTEGER,
-      default_branch TEXT,
-      language TEXT,
-      min_zig_version TEXT,
-      build_zig_exists BOOLEAN NULL,
-      build_zig_fetched_at INTEGER NULL,
-      build_zig_zon_exists BOOLEAN NULL,
-      build_zig_zon_fetched_at INTEGER NULL
-    );
-    CREATE TABLE IF NOT EXISTS url_dependencies (
-      hash TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      url TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
-      name TEXT NOT NULL,
-      dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
-      path TEXT,
-      url_dependency_hash TEXT,
-      FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
-      FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
-      UNIQUE(full_name, name, dependency_type, path)
-    );
-    CREATE INDEX IF NOT EXISTS idx_zig_repos_pushed_at_stars_forks ON zig_repos(pushed_at DESC, stars, forks);
-    CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
-    CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
-    CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
-`);
-
-  // Older Zig projects don't use zon files to list their dependencies
-  // so we need to manually insert them
-  innerDB.exec(`PRAGMA foreign_keys = OFF;`);
-  try {
-    innerDB.exec(`
-      INSERT OR IGNORE INTO zig_repo_dependencies (full_name, name, dependency_type, path)
-      VALUES
-        ('NilsIrl/dockerc', 'argp-standalone', 'path', 'argp-standalone'),
-        ('NilsIrl/dockerc', 'crun', 'path', 'crun'),
-        ('NilsIrl/dockerc', 'fuse-overlayfs', 'path', 'fuse-overlayfs'),
-        ('NilsIrl/dockerc', 'libfuse', 'path', 'libfuse'),
-        ('NilsIrl/dockerc', 'skopeo', 'path', 'skopeo'),
-        ('NilsIrl/dockerc', 'squashfs-tools', 'path', 'squashfs-tools'),
-        ('NilsIrl/dockerc', 'squashfuse', 'path', 'squashfuse'),
-        ('NilsIrl/dockerc', 'umoci', 'path', 'umoci'),
-        ('NilsIrl/dockerc', 'zstd', 'path', 'zstd'),
-        ('zigzap/zap', 'facil.io', 'path', 'facil.io'),
-        ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
-        ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
-        ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
-        ('oven-sh/bun', 'diffz', 'path', 'src/deps/diffz'),
-        ('oven-sh/bun', 'libarchive', 'path', 'src/deps/libarchive'),
-        ('oven-sh/bun', 'lol-html', 'path', 'src/deps/lol-html'),
-        ('oven-sh/bun', 'ls-hpack', 'path', 'src/deps/ls-hpack'),
-        ('oven-sh/bun', 'mimalloc', 'path', 'src/deps/mimalloc'),
-        ('oven-sh/bun', 'patches', 'path', 'src/deps/patches'),
-        ('oven-sh/bun', 'picohttpparser', 'path', 'src/deps/picohttpparser'),
-        ('oven-sh/bun', 'tinycc', 'path', 'src/deps/tinycc'),
-        ('oven-sh/bun', 'zig-clap', 'path', 'src/deps/zig-clap'),
-        ('oven-sh/bun', 'zig', 'path', 'src/deps/zig'),
-        ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
-        ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd'),
-        ('oven-sh/bun', 'libuv', 'path', 'src/deps/libuv.zig'),
-        ('oven-sh/bun', 'libdeflate', 'path', 'src/deps/libdeflate.zig'),
-        ('oven-sh/bun', 'uSockets', 'path', 'bun/packages/bun-usockets'),
-        ('oven-sh/bun', 'uWebsockets', 'path', 'bun/packages/bun-uws'),
-        ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
-        ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
-        ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
-        ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2'),
-        ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap'),
-        ('zfl9/chinadns-ng', 'wolfssl', 'path', 'dep/wolfssl'),
-        ('zfl9/chinadns-ng', 'mimalloc', 'path', 'dep/mimalloc'),
-        ('cztomsik/graffiti', 'emlay', 'path', 'deps/emlay'),
-        ('cztomsik/graffiti', 'glfw', 'path', 'deps/glfw'),
-        ('cztomsik/graffiti', 'nanovg-zig', 'path', 'deps/nanovg-zig'),
-        ('cztomsik/graffiti', 'napigen', 'path', 'deps/napigen'),
-        ('fubark/cyber', 'linenoise', 'path', 'lib/linenoise'),
-        ('fubark/cyber', 'tcc', 'path', 'lib/tcc'),
-        ('fubark/cyber', 'mimalloc', 'path', 'lib/mimalloc'),
-        ('Vexu/bog', 'linenoize', 'path', 'lib/linenoize'),
-        ('mewz-project/mewz', 'newlib', 'path', 'submodules/newlib'),
-        ('mewz-project/mewz', 'lwip', 'path', 'submodules/lwip')
-    `);
-  } finally {
-    innerDB.exec("PRAGMA foreign_keys = ON;");
-  }
-};
-
-const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
-if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
-const githubHeaders = {
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": "2022-11-28",
-  Authorization: `Bearer ${GITHUB_API_KEY}`,
-};
-
-const R2_ENDPOINT = Deno.env.get("R2_ENDPOINT");
-const R2_ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID");
-const R2_SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY");
-if (!R2_ENDPOINT) fatal("R2_ENDPOINT is not set");
-if (!R2_ACCESS_KEY_ID) fatal("R2_ACCESS_KEY_ID is not set");
-if (!R2_SECRET_ACCESS_KEY) fatal("R2_SECRET_ACCESS_KEY is not set");
-
-const R2 = new S3Client({
-  // @ts-ignore - R2 envs is guaranteed to be valid (fatal if not)
-  endPoint: R2_ENDPOINT,
-  port: 443,
-  useSSL: true,
-  region: "auto",
-  bucket: "ziglist-backups",
-  pathStyle: false,
-  accessKey: R2_ACCESS_KEY_ID,
-  secretKey: R2_SECRET_ACCESS_KEY,
-});
-
-const healthcheckGithub = () => {
-  fetch("https://api.github.com/zen", {
-    headers: githubHeaders,
-  }).then(() => {
-    logger.info("healthcheck - GITHUB_API_KEY is valid and usable");
-  }).catch((e) => {
-    fatal(`healthcheck - GitHub API key is invalid: ${e}`);
-  });
-};
-
-const healthcheckDatabase = () => {
-  try {
-    const _ = db.prepare("SELECT COUNT(*) FROM zig_repos").get();
-    logger.info("healthcheck - database is working");
-  } catch (e) {
-    fatal(`healthcheck - database is not working: ${e}`);
-  }
-};
-
-let tailwindcss = "";
-const healthcheckTailwind = () => {
-  try {
-    tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
-    logger.info("healthcheck - tailwind.css is loaded");
-  } catch (e) {
-    fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
-  }
 };
 
 // ----------------------------------------------------------------------------
@@ -916,11 +741,10 @@ const SchemaRepo = z.object({
 }));
 
 /**
- * @param {Database} innerDB
  * @param {z.infer<typeof SchemaRepo>[]} parsed
  */
-const zigReposInsert = (innerDB, parsed) => {
-  const stmt = innerDB.prepare(`
+const zigReposInsert = (parsed) => {
+  const stmt = db.prepare(`
     INSERT INTO zig_repos (
         full_name, name, owner, description, homepage, license, 
         created_at, updated_at, pushed_at, stars, forks, 
@@ -945,7 +769,7 @@ const zigReposInsert = (innerDB, parsed) => {
       `);
 
   try {
-    const upsertMany = innerDB.transaction((data) => {
+    const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
       }
@@ -1119,10 +943,14 @@ const zigReposFetchInsert = async (type) => {
     url = res.next;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  zigReposInsert(db, parsed);
+  zigReposInsert(parsed);
 };
 
 // https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
+//
+// const url = "https://raw.githubusercontent.com/ziglang/zig/master/build.zig.zon"
+// const response = await fetch(url)
+// const parsed = SchemaZon.parse(JSON.parse(await response.text()))
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -1151,12 +979,11 @@ const SchemaZon = z.object({
  */
 
 /**
- * @param {Database} innerDB
  * @param {RepoMetadata[]} parsed
  * @returns {void}
  */
-const zigReposMetadataUpdate = (innerDB, parsed) => {
-  const stmt = innerDB.prepare(`
+const zigReposMetadataUpdate = (parsed) => {
+  const stmt = db.prepare(`
     UPDATE zig_repos
     SET min_zig_version = ?,
         build_zig_exists = ?,
@@ -1167,7 +994,7 @@ const zigReposMetadataUpdate = (innerDB, parsed) => {
   `);
 
   try {
-    const bulkUpdate = innerDB.transaction((data) => {
+    const bulkUpdate = db.transaction((data) => {
       for (const row of data) {
         stmt.run(
           row.min_zig_version ?? null,
@@ -1197,18 +1024,17 @@ const zigReposMetadataUpdate = (innerDB, parsed) => {
  */
 
 /**
- * @param {Database} innerDB
  * @param {UrlDependency[]} parsed
  * @returns {void}
  */
-const urlDependenciesInsert = (innerDB, parsed) => {
-  const stmt = innerDB.prepare(`
+const urlDependenciesInsert = (parsed) => {
+  const stmt = db.prepare(`
     INSERT OR IGNORE INTO url_dependencies (hash, name, url)
     VALUES (?, ?, ?)
   `);
 
   try {
-    const upsertMany = innerDB.transaction((data) => {
+    const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
       }
@@ -1237,18 +1063,17 @@ const urlDependenciesInsert = (innerDB, parsed) => {
  */
 
 /**
- * @param {Database} innerDB
  * @param {ZigRepoDependency[]} parsed
  * @returns {void}
  */
-const zigRepoDependenciesInsert = (innerDB, parsed) => {
-  const stmt = innerDB.prepare(`
+const zigRepoDependenciesInsert = (parsed) => {
+  const stmt = db.prepare(`
     INSERT OR IGNORE INTO zig_repo_dependencies (
       full_name, name, dependency_type, path, url_dependency_hash
     ) VALUES (?, ?, ?, ?, ?)`);
 
   try {
-    const upsertMany = innerDB.transaction((data) => {
+    const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
       }
@@ -1403,9 +1228,9 @@ const zigBuildFetchInsert = async () => {
     }
   }));
 
-  if (repoMetadata.length > 0) zigReposMetadataUpdate(db, repoMetadata);
-  if (urlDeps.length > 0) urlDependenciesInsert(db, urlDeps);
-  if (deps.length > 0) zigRepoDependenciesInsert(db, deps);
+  if (repoMetadata.length > 0) zigReposMetadataUpdate(repoMetadata);
+  if (urlDeps.length > 0) urlDependenciesInsert(urlDeps);
+  if (deps.length > 0) zigRepoDependenciesInsert(deps);
 };
 
 const backup = async () => {
@@ -1446,8 +1271,13 @@ const backup = async () => {
 
 // ----------------------------------------------------------------------------
 // main
+// the moment the app is booted up, it should immediately crash if:
+// - db not restored from backup
+// - db, r2, github api key not working
+// - tailwind doesn't exist
 
 // unrelated repos, but they have zig in their name/description
+// HELP: please add repos displayed by ziglist but not related to zig here!
 const excludedRepos = [
   "manwar/perlweeklychallenge-club",
   "tighten/ziggy",
@@ -1478,17 +1308,55 @@ const excludedRepos = [
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
+// HELP: please add c/cpp repos that builds with zig here!
 const includedRepos = [
   "ggerganov/ggml",
 ];
+
+const logger = createLogger();
+setInterval(() => {
+  logger.flush();
+}, 1000 * 10);
+
+// on crash, for whatever reason
+addEventListener("unload", () => {
+  // should upload logs to R2
+  logger.flush();
+});
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
 const IS_DEV = !IS_PROD;
 logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
-const sqliteBackup = "backup-2024-08-13T03:00:00.002Z.sqlite";
+const GITHUB_API_KEY = Deno.env.get("GITHUB_API_KEY");
+if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+const githubHeaders = {
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  Authorization: `Bearer ${GITHUB_API_KEY}`,
+};
 
-// considered R2 healthcheck, crash on db restore failure
+const R2_ENDPOINT = Deno.env.get("R2_ENDPOINT");
+const R2_ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID");
+const R2_SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY");
+if (!R2_ENDPOINT) fatal("R2_ENDPOINT is not set");
+if (!R2_ACCESS_KEY_ID) fatal("R2_ACCESS_KEY_ID is not set");
+if (!R2_SECRET_ACCESS_KEY) fatal("R2_SECRET_ACCESS_KEY is not set");
+
+const R2 = new S3Client({
+  // @ts-ignore - R2 envs is guaranteed to be valid (fatal if not)
+  endPoint: R2_ENDPOINT,
+  port: 443,
+  useSSL: true,
+  region: "auto",
+  bucket: "ziglist-backups",
+  pathStyle: false,
+  accessKey: R2_ACCESS_KEY_ID,
+  secretKey: R2_SECRET_ACCESS_KEY,
+});
+
+// R2 healthcheck
+const sqliteBackup = "backup-2024-08-13T03:00:00.002Z.sqlite";
 if (IS_PROD) {
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
@@ -1504,24 +1372,151 @@ if (IS_PROD) {
 }
 
 const db = new Database("db.sqlite");
-initDatabase(db);
+db.exec(`
+  PRAGMA journal_mode = WAL;
+  CREATE TABLE IF NOT EXISTS zig_repos (
+    full_name TEXT PRIMARY KEY,
+    name TEXT,
+    owner TEXT,
+    description TEXT NULL,
+    homepage TEXT NULL,
+    license TEXT NULL,
+    created_at INTEGER,
+    updated_at INTEGER,
+    pushed_at INTEGER,
+    stars INTEGER,
+    forks INTEGER,
+    default_branch TEXT,
+    language TEXT,
+    min_zig_version TEXT,
+    build_zig_exists BOOLEAN NULL,
+    build_zig_fetched_at INTEGER NULL,
+    build_zig_zon_exists BOOLEAN NULL,
+    build_zig_zon_fetched_at INTEGER NULL
+  );
+  CREATE TABLE IF NOT EXISTS url_dependencies (
+    hash TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
+    path TEXT,
+    url_dependency_hash TEXT,
+    FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
+    FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
+    UNIQUE(full_name, name, dependency_type, path)
+  );
+  CREATE INDEX IF NOT EXISTS idx_zig_repos_pushed_at_stars_forks ON zig_repos(pushed_at DESC, stars, forks);
+  CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
+  CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
+  CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
+`);
 
+// older Zig projects don't use zon files to list their dependencies
+// so we need to manually insert them
+// HELP: please add missing dependencies here!
+db.exec(`PRAGMA foreign_keys = OFF;`);
+try {
+  db.exec(`
+    INSERT OR IGNORE INTO zig_repo_dependencies (full_name, name, dependency_type, path)
+    VALUES
+      ('NilsIrl/dockerc', 'argp-standalone', 'path', 'argp-standalone'),
+      ('NilsIrl/dockerc', 'crun', 'path', 'crun'),
+      ('NilsIrl/dockerc', 'fuse-overlayfs', 'path', 'fuse-overlayfs'),
+      ('NilsIrl/dockerc', 'libfuse', 'path', 'libfuse'),
+      ('NilsIrl/dockerc', 'skopeo', 'path', 'skopeo'),
+      ('NilsIrl/dockerc', 'squashfs-tools', 'path', 'squashfs-tools'),
+      ('NilsIrl/dockerc', 'squashfuse', 'path', 'squashfuse'),
+      ('NilsIrl/dockerc', 'umoci', 'path', 'umoci'),
+      ('NilsIrl/dockerc', 'zstd', 'path', 'zstd'),
+      ('zigzap/zap', 'facil.io', 'path', 'facil.io'),
+      ('oven-sh/bun', 'boringssl', 'path', 'src/deps/boringssl'),
+      ('oven-sh/bun', 'brotli', 'path', 'src/deps/brotli'),
+      ('oven-sh/bun', 'c-ares', 'path', 'src/deps/c-ares'),
+      ('oven-sh/bun', 'diffz', 'path', 'src/deps/diffz'),
+      ('oven-sh/bun', 'libarchive', 'path', 'src/deps/libarchive'),
+      ('oven-sh/bun', 'lol-html', 'path', 'src/deps/lol-html'),
+      ('oven-sh/bun', 'ls-hpack', 'path', 'src/deps/ls-hpack'),
+      ('oven-sh/bun', 'mimalloc', 'path', 'src/deps/mimalloc'),
+      ('oven-sh/bun', 'patches', 'path', 'src/deps/patches'),
+      ('oven-sh/bun', 'picohttpparser', 'path', 'src/deps/picohttpparser'),
+      ('oven-sh/bun', 'tinycc', 'path', 'src/deps/tinycc'),
+      ('oven-sh/bun', 'zig-clap', 'path', 'src/deps/zig-clap'),
+      ('oven-sh/bun', 'zig', 'path', 'src/deps/zig'),
+      ('oven-sh/bun', 'zlib', 'path', 'src/deps/zlib'),
+      ('oven-sh/bun', 'zstd', 'path', 'src/deps/zstd'),
+      ('oven-sh/bun', 'libuv', 'path', 'src/deps/libuv.zig'),
+      ('oven-sh/bun', 'libdeflate', 'path', 'src/deps/libdeflate.zig'),
+      ('oven-sh/bun', 'uSockets', 'path', 'bun/packages/bun-usockets'),
+      ('oven-sh/bun', 'uWebsockets', 'path', 'bun/packages/bun-uws'),
+      ('buzz-language/buzz', 'linenoise', 'path', 'vendor/linenoise'),
+      ('buzz-language/buzz', 'mimalloc', 'path', 'vendor/mimalloc'),
+      ('buzz-language/buzz', 'mir', 'path', 'vendor/mir'),
+      ('buzz-language/buzz', 'pcre2', 'path', 'vendor/pcre2'),
+      ('orhun/linuxwave', 'zig-clap', 'path', 'libs/zig-clap'),
+      ('zfl9/chinadns-ng', 'wolfssl', 'path', 'dep/wolfssl'),
+      ('zfl9/chinadns-ng', 'mimalloc', 'path', 'dep/mimalloc'),
+      ('cztomsik/graffiti', 'emlay', 'path', 'deps/emlay'),
+      ('cztomsik/graffiti', 'glfw', 'path', 'deps/glfw'),
+      ('cztomsik/graffiti', 'nanovg-zig', 'path', 'deps/nanovg-zig'),
+      ('cztomsik/graffiti', 'napigen', 'path', 'deps/napigen'),
+      ('fubark/cyber', 'linenoise', 'path', 'lib/linenoise'),
+      ('fubark/cyber', 'tcc', 'path', 'lib/tcc'),
+      ('fubark/cyber', 'mimalloc', 'path', 'lib/mimalloc'),
+      ('Vexu/bog', 'linenoize', 'path', 'lib/linenoize'),
+      ('mewz-project/mewz', 'newlib', 'path', 'submodules/newlib'),
+      ('mewz-project/mewz', 'lwip', 'path', 'submodules/lwip')
+    `);
+} finally {
+  db.exec("PRAGMA foreign_keys = ON;");
+}
+
+fetch("https://api.github.com/zen", {
+  headers: githubHeaders,
+}).then(() => {
+  logger.info("healthcheck - GITHUB_API_KEY is valid and usable");
+}).catch((e) => {
+  fatal(`healthcheck - GitHub API key is invalid: ${e}`);
+});
+
+try {
+  db.prepare("SELECT COUNT(*) FROM zig_repos").get();
+  logger.info("healthcheck - database is working");
+} catch (e) {
+  fatal(`healthcheck - database is not working: ${e}`);
+}
+
+let tailwindcss = "";
+try {
+  tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
+  logger.info("healthcheck - tailwind.css is loaded");
+} catch (e) {
+  fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
+}
+
+const parsedIncludedRepos = [];
 includedRepos.forEach(async (repo) => {
   const url = `https://api.github.com/repos/${repo}`;
   const response = await fetch(url, { headers: githubHeaders });
   const data = await response.json();
-  const parsed = SchemaRepo.parse(data);
-  zigReposInsert(db, [parsed]);
+  try {
+    parsedIncludedRepos.push(SchemaRepo.parse(data));
+  } catch (e) {
+    logger.error("SchemaRepo.parse", {
+      fullName: data.full_name,
+      error: e,
+    });
+  }
 });
-
-// should crash if any of the healthchecks fail
-healthcheckGithub();
-healthcheckTailwind();
-healthcheckDatabase();
+zigReposInsert(parsedIncludedRepos);
 
 const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
-Deno.serve({ port: 8080 }, app.fetch);
+Deno.serve({ port }, app.fetch);
 
 zigReposFetchInsert("top");
 zigBuildFetchInsert();
