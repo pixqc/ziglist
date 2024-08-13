@@ -875,7 +875,7 @@ app.notFound((c) => {
 // indexer
 
 /**
- * const url = "https://api.github.com/search/repositories?q=language%3Azig&per_page=100&page=1"
+ * const url = "https://api.github.com/search/repositories?q=language%3Azig"
  * const response = await fetch(url)
  * const data = await response.json()
  * const parsed = data.items.map(SchemaRepo.parse)
@@ -982,6 +982,21 @@ let monthsAfterLast = 0;
 let currentWeekIncrementIndex = 0;
 
 /**
+ * zigReposURLMake("top") fetches popular zig repos
+ * zigReposURLMake("all") is the meat of the program, fetches everything
+ *
+ * invariants: github repo search api returns 1k items at most,
+ * the interval between these weeks are handpicked to fetch the most stuff
+ * while not crossing the 1k limit
+ *
+ * link produced by zigReposURLMake("all") eg.
+ *
+ * https://api.github.com/search/repositories?q=in%3Aname%2Cdescr
+ * iption%2Ctopics%20zig%20created%3A2015-07-04T00%3A00%3A00Z..20
+ * 17-09-02T00%3A00%3A00Z&per_page=100&page=1
+ *
+ * this is guaranteed to have 983 items, 113 weeks since zig init commit
+ *
  * @param {'top' | 'all'} type
  * @returns {string}
  */
@@ -1053,7 +1068,7 @@ const zigReposURLMake = (type) => {
 };
 
 /**
- * @param {string} url - The GitHub API endpoint URL to fetch from.
+ * @param {string} url
  * @returns {Promise<{
  *   status: number,
  *   items: any[],
@@ -1107,6 +1122,7 @@ const zigReposFetchInsert = async (type) => {
   zigReposInsert(db, parsed);
 };
 
+// https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -1126,10 +1142,20 @@ const SchemaZon = z.object({
 });
 
 /**
- * @param {Database} innerDB
- * @param {Object[]} parsed
+ * @typedef {Object} RepoMetadata
+ * @property {string} full_name
+ * @property {string|undefined} min_zig_version
+ * @property {boolean} buildZigExists
+ * @property {boolean} zonExists
+ * @property {number} fetchedAt
  */
-const zigReposZonUpdate = (innerDB, parsed) => {
+
+/**
+ * @param {Database} innerDB
+ * @param {RepoMetadata[]} parsed
+ * @returns {void}
+ */
+const zigReposMetadataUpdate = (innerDB, parsed) => {
   const stmt = innerDB.prepare(`
     UPDATE zig_repos
     SET min_zig_version = ?,
@@ -1163,6 +1189,18 @@ const zigReposZonUpdate = (innerDB, parsed) => {
   }
 };
 
+/**
+ * @typedef {Object} UrlDependency
+ * @property {string} hash
+ * @property {string} name
+ * @property {string} url
+ */
+
+/**
+ * @param {Database} innerDB
+ * @param {UrlDependency[]} parsed
+ * @returns {void}
+ */
 const urlDependenciesInsert = (innerDB, parsed) => {
   const stmt = innerDB.prepare(`
     INSERT OR IGNORE INTO url_dependencies (hash, name, url)
@@ -1190,8 +1228,18 @@ const urlDependenciesInsert = (innerDB, parsed) => {
 };
 
 /**
+ * @typedef {Object} ZigRepoDependency
+ * @property {string} full_name
+ * @property {string} name
+ * @property {string} dependency_type
+ * @property {string|null} path
+ * @property {string|null} url_dependency_hash
+ */
+
+/**
  * @param {Database} innerDB
- * @param {Object[]} parsed
+ * @param {ZigRepoDependency[]} parsed
+ * @returns {void}
  */
 const zigRepoDependenciesInsert = (innerDB, parsed) => {
   const stmt = innerDB.prepare(`
@@ -1274,9 +1322,14 @@ const zigBuildFetchInsert = async () => {
   const repos = stmt.all();
   stmt.finalize();
 
+  // not using zod here bc the incoming zon is already parsed, it's redundant
+  /** @type {ZigRepoDependency[]} */
   const deps = [];
+  /** @type {RepoMetadata[]} */
   const repoMetadata = [];
+  /** @type {UrlDependency[]} */
   const urlDeps = [];
+
   await Promise.all(repos.map(async (repo) => {
     const url1 = zigBuildURLMake(repo.full_name, repo.default_branch, "zig");
     const res1 = await zigBuildFetch(url1);
@@ -1350,7 +1403,7 @@ const zigBuildFetchInsert = async () => {
     }
   }));
 
-  if (repoMetadata.length > 0) zigReposZonUpdate(db, repoMetadata);
+  if (repoMetadata.length > 0) zigReposMetadataUpdate(db, repoMetadata);
   if (urlDeps.length > 0) urlDependenciesInsert(db, urlDeps);
   if (deps.length > 0) zigRepoDependenciesInsert(db, deps);
 };
