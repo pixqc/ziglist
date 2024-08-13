@@ -448,15 +448,25 @@ const Footer = () => (
       <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
     </div>
     <p className="text-stone-400 dark:text-stone-500 text-sm">
-      ziglist.org by{"  "}
+      ziglist.org by @pixqc (
       <a
         target="_blank"
         rel="noopener noreferrer"
         href="https://github.com/pixqc"
         className="hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
-        @pixqc
+        GitHub
       </a>
+      {"; "}
+      <a
+        target="_blank"
+        rel="noopener noreferrer"
+        href="https://x.com/pixqc"
+        className="hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
+      >
+        x.com
+      </a>
+      )
     </p>
   </div>
 );
