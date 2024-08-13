@@ -492,6 +492,11 @@ const BaseLayout = ({ children, currentPath, page }) => (
 const DependencyList = ({ deps }) => {
   return (
     <div>
+      {popularDependencies && (
+        <p className="text-sm text-stone-700 dark:text-stone-300 mb-6">
+          Top 25 popular dependencies: {popularDependencies}
+        </p>
+      )}
       {deps.map((repo, index) => (
         <div key={index} className="mb-6 flex flex-col space-y-0">
           <h3 className="font-semibold text-stone-900 dark:text-stone-100 overflow-hidden">
@@ -1271,8 +1276,8 @@ const backup = async () => {
 
 // ----------------------------------------------------------------------------
 // main
-// the moment the app is booted up, it should immediately crash if:
-// - db not restored from backup
+// the moment the program is booted up, it should immediately crash if:
+// - db not restored from backup (prod only)
 // - db, r2, github api key not working
 // - tailwind doesn't exist
 
@@ -1356,8 +1361,8 @@ const R2 = new S3Client({
 });
 
 // R2 healthcheck
-const sqliteBackup = "backup-2024-08-13T03:00:00.002Z.sqlite";
 if (IS_PROD) {
+  const sqliteBackup = "backup-2024-08-13T03:00:00.002Z.sqlite";
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
     const localOutFile = await Deno.open("db.sqlite", {
@@ -1497,6 +1502,48 @@ try {
 } catch (e) {
   fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
 }
+
+let popularDependencies;
+const updatePopularDependencies = () => {
+  const stmt = db.prepare(`
+    WITH url_dependencies AS (
+      SELECT 
+        REPLACE(name, '-', '_') as normalized_name,
+        COUNT(*) as url_dependency_count,
+        COUNT(DISTINCT url_dependency_hash) as hash_version_count
+      FROM zig_repo_dependencies
+      WHERE dependency_type = 'url'
+      GROUP BY normalized_name
+    ),
+    path_dependencies AS (
+      SELECT 
+        REPLACE(name, '-', '_') as normalized_name,
+        COUNT(*) as path_dependency_count
+      FROM zig_repo_dependencies
+      WHERE dependency_type = 'path'
+      GROUP BY normalized_name
+    ),
+    top_25_dependencies AS (
+      SELECT 
+        COALESCE(u.normalized_name, p.normalized_name) as normalized_name,
+        COALESCE(u.url_dependency_count, 0) + COALESCE(p.path_dependency_count, 0) as total_dependency_count
+      FROM url_dependencies u
+      FULL OUTER JOIN path_dependencies p ON u.normalized_name = p.normalized_name
+      ORDER BY total_dependency_count DESC
+      LIMIT 20
+    )
+    SELECT 
+      json_array(
+        json_group_array(normalized_name)
+      ) as json_names
+    FROM top_25_dependencies;`);
+
+  const result = stmt.all();
+  stmt.finalize();
+  const parsedData = typeof result === "string" ? JSON.parse(result) : result;
+  popularDependencies = parsedData[0].json_names[0].join(", ");
+};
+updatePopularDependencies();
 
 const parsedIncludedRepos = [];
 includedRepos.forEach(async (repo) => {
