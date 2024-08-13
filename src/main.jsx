@@ -58,6 +58,10 @@ const createLogger = () => {
     },
   };
 };
+const logger = createLogger();
+setInterval(() => {
+  logger.flush();
+}, 1000 * 10);
 
 /**
  * A wise man once said:
@@ -1424,11 +1428,6 @@ const excludedRepos = [
 const includedRepos = [
   "ggerganov/ggml",
 ];
-
-const logger = createLogger();
-setInterval(() => {
-  logger.flush();
-}, 1000 * 10);
 
 const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
 const IS_DEV = !IS_PROD;
