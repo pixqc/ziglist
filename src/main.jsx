@@ -1434,7 +1434,7 @@ const IS_PROD = Deno.env.get("IS_PROD") !== undefined;
 const IS_DEV = !IS_PROD;
 logger.info(`running on ${IS_PROD ? "prod" : "dev"} mode`);
 
-const sqliteBackup = "backup-2024-08-12T06:00:00.002Z.sqlite";
+const sqliteBackup = "backup-2024-08-13T03:00:00.002Z.sqlite";
 
 // considered R2 healthcheck, crash on db restore failure
 if (IS_PROD) {
@@ -1475,4 +1475,4 @@ zigReposFetchInsert("top");
 zigBuildFetchInsert();
 Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-Deno.cron("backup", "0 */3 * * *", backup);
+Deno.cron("backup", "0 0,12 * * *", backup);
