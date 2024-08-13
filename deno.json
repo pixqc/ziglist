@@ -1,8 +1,6 @@
 {
   "tasks": {
-    "start:main": "IS_PROD=1 deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env ./src/main.jsx",
-    "start:tailwind": "IS_PROD=1 deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --minify",
-    "start": "deno task start:tailwind && deno task start:main",
+    "start": "IS_PROD=1 deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env ./src/main.jsx",
 
     "dev:main": "deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env --watch ./src/main.jsx",
     "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --watch --minify",
