@@ -1559,21 +1559,21 @@ const updatePopularDependencies = () => {
 };
 updatePopularDependencies();
 
-const parsedIncludedRepos = [];
 includedRepos.forEach(async (repo) => {
   const url = `https://api.github.com/repos/${repo}`;
   const response = await fetch(url, { headers: githubHeaders });
   const data = await response.json();
+  let parsed;
   try {
-    parsedIncludedRepos.push(SchemaRepo.parse(data));
+    parsed = SchemaRepo.parse(data);
   } catch (e) {
     logger.error("SchemaRepo.parse", {
-      fullName: data.full_name,
+      fullName: repo,
       error: e,
     });
   }
+  if (parsed) zigReposInsert([parsed]);
 });
-zigReposInsert(parsedIncludedRepos);
 
 const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
