@@ -502,11 +502,15 @@ const BaseLayout = ({ children, currentPath, page }) => (
 const DependencyList = ({ deps }) => {
   return (
     <div>
-      {popularDependencies && (
-        <p className="text-sm text-stone-700 dark:text-stone-300 mb-6">
-          Top 25 popular dependencies: {popularDependencies}
-        </p>
-      )}
+      <div className="flex flex-wrap gap-1 items-center mb-6">
+        <span className="text-sm text-stone-500 dark:text-stone-400">
+          Popular dependencies:
+        </span>
+        {popularDependencies.map((dep) => <Badge value={dep} />)}
+      </div>
+      <p className="text-center mb-6 text-stone-300 dark:text-stone-600">
+        · · ·
+      </p>
       {deps.map((repo, index) => (
         <div key={index} className="mb-6 flex flex-col space-y-0">
           <h3 className="font-semibold text-stone-900 dark:text-stone-100 overflow-hidden">
@@ -965,7 +969,7 @@ const zigReposFetchInsert = async (type) => {
 //
 // const url = "https://raw.githubusercontent.com/ziglang/zig/master/build.zig.zon"
 // const response = await fetch(url)
-// const parsed = SchemaZon.parse(JSON.parse(await response.text()))
+// const parsed = SchemaZon.parse(JSON.parse(zon2json(await response.text())))
 const SchemaZon = z.object({
   name: z.string(),
   version: z.string(),
@@ -1551,7 +1555,7 @@ const updatePopularDependencies = () => {
   const result = stmt.all();
   stmt.finalize();
   const parsedData = typeof result === "string" ? JSON.parse(result) : result;
-  popularDependencies = parsedData[0].json_names[0].join(", ");
+  popularDependencies = parsedData[0].json_names[0];
 };
 updatePopularDependencies();
 
