@@ -19,3 +19,5 @@ Help wanted! If you found:
 Please open an issue or a PR, ctrl+f for `HELP:` in the [file](./src/main.jsx).
 
 Ziglist's visual design is inspired by [https://github.com/piotrkulpinski/openalternative](https://github.com/piotrkulpinski/openalternative)
+
+Check out the [blogpost](https://pixqc.com/ziglist)!
