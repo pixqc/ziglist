@@ -6,8 +6,6 @@ import { S3Client } from "s3";
 
 // TODO:
 // - fuzzy/full text search, /all
-// - orphaned +25 deps text
-// - stale zon data, need refetch
 
 // ----------------------------------------------------------------------------
 // utils
@@ -233,7 +231,7 @@ const Badge = ({ value }) => (
 const RepoDetail = ({ kind, value }) => (
   <div className="flex">
     <span className="text-sm text-stone-500 dark:text-stone-400">{kind}</span>
-    <div className="flex-grow flex flex-col px-3">
+    <div className="grow flex flex-col px-3">
       <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
       <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
     </div>
@@ -252,7 +250,7 @@ const SpecialCard = () => {
         Feature requests? Missing dependencies in one of the pkgs/projects? Let
         me know!
       </p>
-      <div className="flex-grow" />
+      <div className="grow" />
       <a
         href="https://github.com/pixqc/ziglist/issues"
         target="_blank"
@@ -266,6 +264,7 @@ const SpecialCard = () => {
 };
 
 const RepoCard = ({ repo }) => {
+  const shownDeps = 5;
   return (
     <a
       href={`https://github.com/${repo.owner}/${repo.name}`}
@@ -283,7 +282,7 @@ const RepoCard = ({ repo }) => {
             : repo.description}
         </p>
       )}
-      <div className="flex-grow" />
+      <div className="grow" />
       <div className="flex flex-wrap gap-1 mb-1">
         {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
@@ -296,19 +295,16 @@ const RepoCard = ({ repo }) => {
           <span className="text-sm text-stone-500 dark:text-stone-400">
             Deps:
           </span>
-          {repo.dependencies.slice(0, 3).map((dep) => <Badge value={dep} />)}
-          {
-            /*
-              <div className="flex-grow flex flex-col px-1 min-w-0">
+          {repo.dependencies.slice(0, shownDeps).map((dep) => (
+            <Badge value={dep} />
+          ))}
+          {repo.dependencies.length > shownDeps && (
+            <span className="flex text-sm text-stone-500 dark:text-stone-400 grow">
+              <div className="grow flex flex-col pr-1">
                 <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
                 <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
               </div>
-            */
-          }
-          {repo.dependencies.length > 3 && (
-            <span className="text-sm text-stone-500 dark:text-stone-400">
-              {/* might be orphaned at it looks bad */}
-              +{repo.dependencies.length - 3} more
+              +{repo.dependencies.length - shownDeps} more
             </span>
           )}
         </div>
@@ -415,7 +411,7 @@ const Navigation = ({ currentPath }) => {
         Deps
       </a>
 
-      <div className="flex-grow flex flex-col">
+      <div className="grow flex flex-col">
         <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
         <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
       </div>
@@ -456,7 +452,7 @@ const Pagination = ({ currentPath, page }) => {
 
 const Footer = () => (
   <div className="flex max-w-5xl mx-auto px-3 mb-6 space-x-4 items-center">
-    <div className="flex-grow flex flex-col">
+    <div className="grow flex flex-col">
       <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
       <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
     </div>
@@ -546,7 +542,7 @@ const DependencyList = ({ deps }) => {
                 className="text-sm text-stone-700 dark:text-stone-300 sm:flex sm:items-start"
               >
                 <span className="flex-shrink-0 mr-1 sm:mr-0">{dep.name}</span>
-                <div className="hidden sm:flex flex-grow flex-col px-1 sm:px-2 pt-2.5 min-w-0">
+                <div className="hidden sm:flex grow flex-col px-1 sm:px-2 pt-2.5 min-w-0">
                   <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
                   <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
                 </div>
