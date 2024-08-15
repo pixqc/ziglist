@@ -1390,7 +1390,7 @@ const R2 = new S3Client({
 
 // R2 healthcheck
 if (IS_PROD) {
-  const sqliteBackup = "backup-2024-08-15T10_46_52.825Z.sqlite";
+  const sqliteBackup = "backup-2024-08-15T12:00:00.002Z.sqlite";
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
     const localOutFile = await Deno.open("db.sqlite", {
