@@ -4,6 +4,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { S3Client } from "s3";
 
+// TODO:
+// - fuzzy/full text search, /all
+// - orphaned +25 deps text
+// - stale zon data, need refetch
+
 // ----------------------------------------------------------------------------
 // utils
 
@@ -1559,21 +1564,25 @@ const updatePopularDependencies = () => {
 };
 updatePopularDependencies();
 
-includedRepos.forEach(async (repo) => {
-  const url = `https://api.github.com/repos/${repo}`;
-  const response = await fetch(url, { headers: githubHeaders });
-  const data = await response.json();
-  let parsed;
-  try {
-    parsed = SchemaRepo.parse(data);
-  } catch (e) {
-    logger.error("SchemaRepo.parse", {
-      fullName: repo,
-      error: e,
-    });
+const updateIncludedRepos = async () => {
+  const parsedArr = [];
+  for (const repo of includedRepos) {
+    const url = `https://api.github.com/repos/${repo}`;
+    try {
+      const response = await fetch(url, { headers: githubHeaders });
+      const data = await response.json();
+      const parsed = SchemaRepo.parse(data);
+      parsedArr.push(parsed);
+    } catch (e) {
+      logger.error("SchemaRepo.parse or fetch", {
+        fullName: repo,
+        error: e,
+      });
+    }
   }
-  if (parsed) zigReposInsert([parsed]);
-});
+  logger.info(`updateIncludedRepos - ${parsedArr.length} repos fetched`);
+  zigReposInsert(parsedArr);
+};
 
 const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
@@ -1581,6 +1590,8 @@ Deno.serve({ port }, app.fetch);
 
 zigReposFetchInsert("top");
 zigBuildFetchInsert();
+updateIncludedRepos();
 Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
 Deno.cron("backup", "0 0,12 * * *", backup);
