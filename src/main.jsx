@@ -300,7 +300,7 @@ const RepoCard = ({ repo }) => {
           ))}
           {repo.dependencies.length > shownDeps && (
             <span className="flex text-sm text-stone-500 dark:text-stone-400 grow">
-              <div className="grow flex flex-col pr-1">
+              <div className="grow flex flex-col pr-3">
                 <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
                 <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
               </div>
