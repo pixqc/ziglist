@@ -252,7 +252,7 @@ const SpecialCard = () => {
         Feature requests? Missing dependencies in one of the pkgs/projects? Let
         me know!
       </p>
-      <div className="flex-grow"></div>
+      <div className="flex-grow" />
       <a
         href="https://github.com/pixqc/ziglist/issues"
         target="_blank"
@@ -283,7 +283,7 @@ const RepoCard = ({ repo }) => {
             : repo.description}
         </p>
       )}
-      <div className="flex-grow"></div>
+      <div className="flex-grow" />
       <div className="flex flex-wrap gap-1 mb-1">
         {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
@@ -297,8 +297,16 @@ const RepoCard = ({ repo }) => {
             Deps:
           </span>
           {repo.dependencies.slice(0, 3).map((dep) => <Badge value={dep} />)}
+          {
+            /*
+              <div className="flex-grow flex flex-col px-1 min-w-0">
+                <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
+                <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
+              </div>
+            */
+          }
           {repo.dependencies.length > 3 && (
-            <span className="text-xs text-stone-500 dark:text-stone-400">
+            <span className="text-sm text-stone-500 dark:text-stone-400">
               {/* might be orphaned at it looks bad */}
               +{repo.dependencies.length - 3} more
             </span>
@@ -738,6 +746,7 @@ const SchemaRepo = z.object({
   description: z.string().nullish(),
   language: z.string().nullish(),
   stargazers_count: z.number(),
+  fork: z.boolean(),
   forks_count: z.number(),
   created_at: z.string().transform((dateString) =>
     Math.floor(new Date(dateString).getTime() / 1000)
@@ -754,13 +763,14 @@ const SchemaRepo = z.object({
   homepage: z.string().nullish(),
   default_branch: z.string(),
 }).transform((
-  { owner, license, stargazers_count, forks_count, homepage, ...rest },
+  { owner, license, stargazers_count, forks_count, homepage, fork, ...rest },
 ) => ({
   owner: owner.login,
   license: license?.spdx_id || null,
   stars: stargazers_count,
   forks: forks_count,
   homepage: homepage || null,
+  is_fork: fork,
   ...rest,
 }));
 
@@ -772,11 +782,11 @@ const zigReposInsert = (parsed) => {
     INSERT INTO zig_repos (
         full_name, name, owner, description, homepage, license, 
         created_at, updated_at, pushed_at, stars, forks, 
-        default_branch, language,
+        is_fork, default_branch, language,
         min_zig_version, build_zig_exists, build_zig_fetched_at,
         build_zig_zon_exists, build_zig_zon_fetched_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
     ON CONFLICT(full_name) DO UPDATE SET
         name = excluded.name,
         owner = excluded.owner,
@@ -788,17 +798,16 @@ const zigReposInsert = (parsed) => {
         pushed_at = excluded.pushed_at,
         stars = excluded.stars,
         forks = excluded.forks,
+        is_fork = excluded.is_fork,
         default_branch = excluded.default_branch,
         language = excluded.language;
-      `);
-
+  `);
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
       }
     });
-
     const rows = parsed.map((item) => [
       item.full_name,
       item.name,
@@ -811,10 +820,10 @@ const zigReposInsert = (parsed) => {
       item.pushed_at,
       item.stars,
       item.forks,
+      item.is_fork,
       item.default_branch,
       item.language,
     ]);
-
     upsertMany(rows);
     logger.info(`zig_repos bulk insert - len ${rows.length}`);
   } catch (e) {
@@ -933,7 +942,8 @@ const zigReposFetch = async (url) => {
     );
     next = nextLink?.match(/<(.*)>/)?.[1];
   }
-  const items = (await response.json()).items.filter(Boolean);
+  const data = await response.json();
+  const items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
   return {
     status: response.status,
     items,
@@ -1413,6 +1423,7 @@ db.exec(`
     pushed_at INTEGER,
     stars INTEGER,
     forks INTEGER,
+    is_fork BOOLEAN,
     default_branch TEXT,
     language TEXT,
     min_zig_version TEXT,
@@ -1592,9 +1603,9 @@ logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
 zigReposFetchInsert("top");
-zigBuildFetchInsert();
 updateIncludedRepos();
-Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-Deno.cron("backup", "0 0,12 * * *", backup);
+// zigBuildFetchInsert();
+// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+// Deno.cron("backup", "0 0,12 * * *", backup);
