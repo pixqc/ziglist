@@ -304,7 +304,7 @@ const RepoCard = ({ repo }) => {
                 <div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
                 <div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
               </div>
-              +{repo.dependencies.length - shownDeps} more
+              +{repo.dependencies.length - shownDeps} more deps
             </span>
           )}
         </div>
@@ -1449,6 +1449,34 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
   CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
   CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
+
+  -- Full text search
+  CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
+    full_name, 
+    name, 
+    owner, 
+    description, 
+    homepage
+  );
+  INSERT INTO zig_repos_fts(full_name, name, owner, description, homepage)
+    SELECT full_name, name, owner, description, homepage
+    FROM zig_repos;
+  CREATE TRIGGER IF NOT EXISTS zig_repos_ai AFTER INSERT ON zig_repos BEGIN
+    INSERT INTO zig_repos_fts(full_name, name, owner, description, homepage)
+    VALUES (NEW.full_name, NEW.name, NEW.owner, NEW.description, NEW.homepage);
+  END;
+  CREATE TRIGGER IF NOT EXISTS zig_repos_ad AFTER DELETE ON zig_repos BEGIN
+    DELETE FROM zig_repos_fts WHERE full_name = OLD.full_name;
+  END;
+  CREATE TRIGGER IF NOT EXISTS zig_repos_au AFTER UPDATE ON zig_repos BEGIN
+    UPDATE zig_repos_fts SET
+      full_name = NEW.full_name,
+      name = NEW.name,
+      owner = NEW.owner,
+      description = NEW.description,
+      homepage = NEW.homepage
+    WHERE full_name = OLD.full_name;
+  END;
 `);
 
 // older Zig projects don't use zon files to list their dependencies
