@@ -1373,6 +1373,7 @@ const backup = async () => {
 // - tailwind doesn't exist
 
 // unrelated repos, but they have zig in their name/description
+// TODO: SELECT count(*) FROM zig_repos WHERE LOWER(name) LIKE '%zigzag%' and language is not 'Zig';
 // HELP: please add repos displayed by ziglist but not related to zig here!
 const excludedRepos = [
   "manwar/perlweeklychallenge-club",
@@ -1401,6 +1402,8 @@ const excludedRepos = [
   "ZigZag-Project/zigzag-v1",
   "coderDarren/ZigZagClone",
   "jeedom-zigate/jeedom-plugin-zigate",
+  "isdrupter/ziggystartux",
+  "artyang/ziggystartux",
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
@@ -1690,10 +1693,10 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
-// zigReposFetchInsert("top");
-// updateIncludedRepos();
-// zigBuildFetchInsert();
-// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-// Deno.cron("backup", "0 0,12 * * *", backup);
+zigReposFetchInsert("top");
+updateIncludedRepos();
+zigBuildFetchInsert();
+Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+Deno.cron("backup", "0 0,12 * * *", backup);
