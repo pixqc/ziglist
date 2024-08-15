@@ -287,10 +287,9 @@ const RepoCard = ({ repo }) => {
       <div className="flex flex-wrap gap-1 mb-1">
         {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
-        {repo.is_fork === 1 && <Badge value={"fork"} />}
-        {repo.build_zig_exists === 1 && repo.language !== "Zig" && (
-          <Badge value={`lang:${repo.language}`} />
-        )}
+        {repo.is_fork === 1 && <Badge value={"fork:true"} />}
+        {repo.build_zig_exists === 1 && repo.language !== "Zig" &&
+          repo.language !== null && <Badge value={`lang:${repo.language}`} />}
       </div>
       {repo.dependencies && repo.dependencies.length > 0 && (
         <div className="flex flex-wrap gap-1 items-center">
@@ -1103,7 +1102,7 @@ const urlDependenciesInsert = (parsed) => {
  */
 const zigRepoDependenciesInsert = (parsed) => {
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO zig_repo_dependencies (
+    INSERT OR REPLACE INTO zig_repo_dependencies (
       full_name, name, dependency_type, path, url_dependency_hash
     ) VALUES (?, ?, ?, ?, ?)`);
 
@@ -1349,9 +1348,6 @@ const excludedRepos = [
 // HELP: please add c/cpp repos that builds with zig here!
 const includedRepos = [
   "ggerganov/ggml",
-  "spsforks/ziglang-zig",
-  "paoda/zba",
-  "riverwm/river",
 ];
 
 const logger = createLogger();
