@@ -287,6 +287,7 @@ const RepoCard = ({ repo }) => {
       <div className="flex flex-wrap gap-1 mb-1">
         {repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
         {repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
+        {repo.is_fork === 1 && <Badge value={"fork"} />}
         {repo.build_zig_exists === 1 && repo.language !== "Zig" && (
           <Badge value={`lang:${repo.language}`} />
         )}
@@ -1348,6 +1349,9 @@ const excludedRepos = [
 // HELP: please add c/cpp repos that builds with zig here!
 const includedRepos = [
   "ggerganov/ggml",
+  "spsforks/ziglang-zig",
+  "paoda/zba",
+  "riverwm/river",
 ];
 
 const logger = createLogger();
@@ -1447,6 +1451,7 @@ db.exec(`
     FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
     FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
     UNIQUE(full_name, name, dependency_type, path)
+    UNIQUE(full_name, name, dependency_type, url_dependency_hash)
   );
   CREATE INDEX IF NOT EXISTS idx_zig_repos_pushed_at_stars_forks ON zig_repos(pushed_at DESC, stars, forks);
   CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
@@ -1604,8 +1609,8 @@ Deno.serve({ port }, app.fetch);
 
 zigReposFetchInsert("top");
 updateIncludedRepos();
-// zigBuildFetchInsert();
-// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-// Deno.cron("backup", "0 0,12 * * *", backup);
+zigBuildFetchInsert();
+Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+Deno.cron("backup", "0 0,12 * * *", backup);

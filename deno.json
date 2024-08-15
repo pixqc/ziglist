@@ -5,6 +5,7 @@
     "dev:main": "deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env --watch ./src/main.jsx",
     "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --minify",
     "dev:restore": "deno run --allow-read --allow-write --allow-env --allow-net ./src/restore.js",
+    "dev:clean": "rm db.sqlite db.sqlite-shm db.sqlite-wal",
     "dev:init": "deno task dev:tailwind && deno task dev:restore",
     "dev": "deno task dev:tailwind -- --watch & deno task dev:main"
   },
