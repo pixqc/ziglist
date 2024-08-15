@@ -8,6 +8,7 @@ To run Ziglist locally:
 
 - Install Deno, refer to the [documentation](https://docs.deno.com/runtime/manual/getting_started/installation/)
 - `git clone https://github.com/pixqc/ziglist.git`
+- `mv .env.example .env` and fill it out
 - `deno task dev`
 
 Help wanted! If you found:
