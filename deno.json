@@ -3,8 +3,10 @@
     "start": "IS_PROD=1 deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env ./src/main.jsx",
 
     "dev:main": "deno run --allow-ffi --allow-env --allow-read --allow-write --allow-net --env --watch ./src/main.jsx",
-    "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --watch --minify",
-    "dev": "deno task dev:tailwind & deno task dev:main"
+    "dev:tailwind": "deno run -A npm:tailwindcss -- -i ./assets/style.css -o ./assets/tailwind.css --minify",
+    "dev:restore": "deno run --allow-read --allow-write --allow-env --allow-net ./src/restore.js",
+    "dev:init": "deno task dev:tailwind && deno task dev:restore",
+    "dev": "deno task dev:tailwind -- --watch & deno task dev:main"
   },
   "unstable": ["ffi", "kv", "cron"],
   "imports": {
