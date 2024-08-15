@@ -682,6 +682,69 @@ app.get("/top", (c) => {
   );
 });
 
+app.get("/search", (c) => {
+  const perPage = 30;
+  const page = parseInt(c.req.query("page") || "1", 10);
+  const offset = (page - 1) * perPage;
+  const searchQuery = c.req.query("q") || "";
+
+  const matchStmt = db.prepare(`
+    SELECT full_name
+    FROM zig_repos_fts
+    WHERE zig_repos_fts MATCH ?
+    LIMIT ? OFFSET ?
+  `);
+  const matchedFullNames = matchStmt.all(searchQuery, perPage, offset);
+  matchStmt.finalize();
+
+  if (matchedFullNames.length === 0) {
+    logger.info(
+      `GET /search?q=${searchQuery}&page=${page} - 0 results from db`,
+    );
+    return c.html(
+      <BaseLayout currentPath="/search" page={page}>
+        <RepoGrid repos={[]} currentPath="/search" page={page} />
+      </BaseLayout>,
+    );
+  }
+
+  const repoStmt = db.prepare(`
+    SELECT
+      r.*,
+      json_group_array(d.name) AS dependencies
+    FROM zig_repos r
+    LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
+    WHERE r.full_name IN (${matchedFullNames.map(() => "?").join(", ")})
+      AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+      AND r.full_name NOT IN (${excludedRepos.map(() => "?").join(", ")})
+    GROUP BY r.full_name
+  `);
+
+  const repos = repoStmt.all(
+    ...matchedFullNames.map((m) => m.full_name),
+    ...excludedRepos,
+  );
+  repoStmt.finalize();
+  repos.forEach((repo) => {
+    if (repo.dependencies[0] === null) repo.dependencies = [];
+  });
+
+  logger.info(
+    `GET /search?q=${searchQuery}&page=${page} - ${repos.length} results from db`,
+  );
+
+  return c.html(
+    <BaseLayout currentPath="/search" page={page}>
+      <RepoGrid
+        repos={Object.values(repos)}
+        currentPath="/search"
+        page={page}
+      />
+    </BaseLayout>,
+  );
+});
+
 app.get("/dependencies", (c) => {
   const stmt = db.prepare(`
     SELECT 
@@ -1627,10 +1690,10 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
-zigReposFetchInsert("top");
-updateIncludedRepos();
-zigBuildFetchInsert();
-Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-Deno.cron("backup", "0 0,12 * * *", backup);
+// zigReposFetchInsert("top");
+// updateIncludedRepos();
+// zigBuildFetchInsert();
+// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+// Deno.cron("backup", "0 0,12 * * *", backup);
