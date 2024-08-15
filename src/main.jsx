@@ -1162,9 +1162,12 @@ const zigBuildFetchInsert = async () => {
   const stmt = db.prepare(`
     SELECT full_name, default_branch
     FROM zig_repos
-    WHERE build_zig_zon_fetched_at IS NULL
-      AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-      AND (description IS NULL OR description NOT LIKE '%zigbee%' COLLATE NOCASE)
+    WHERE (
+        build_zig_zon_fetched_at IS NULL
+        OR (strftime('%s', 'now') - build_zig_zon_fetched_at) > 259200
+    )
+    AND full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+    AND (description IS NULL OR description NOT LIKE '%zigbee%' COLLATE NOCASE)
     ORDER BY stars DESC
     LIMIT 41;`);
 
