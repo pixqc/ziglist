@@ -301,16 +301,26 @@ const SpecialCard = () => {
 };
 
 const RepoCard = ({ repo }) => {
+  const isCodeberg = repo.full_name.startsWith("codeberg:");
   const shownDeps = 5;
+
+  const repoUrl = isCodeberg
+    ? `https://codeberg.org/${repo.full_name.replace("codeberg:", "")}`
+    : `https://github.com/${repo.owner}/${repo.name}`;
+
+  const displayName = isCodeberg
+    ? repo.full_name.replace("codeberg:", "")
+    : `${repo.owner}/${repo.name}`;
+
   return (
     <a
-      href={`https://github.com/${repo.owner}/${repo.name}`}
+      href={repoUrl}
       target="_blank"
       rel="noopener noreferrer"
       className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors"
     >
       <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1 hover:underline break-words">
-        {repo.owner}/{repo.name}
+        {displayName}
       </h3>
       {repo.description && (
         <p className="text-sm text-stone-700 dark:text-stone-300 mb-2 break-words">
@@ -326,6 +336,7 @@ const RepoCard = ({ repo }) => {
         {repo.is_fork === 1 && <Badge value={"fork:true"} />}
         {repo.build_zig_exists === 1 && repo.language !== "Zig" &&
           repo.language !== null && <Badge value={`lang:${repo.language}`} />}
+        {isCodeberg && <Badge value={"codeberg"} />}
       </div>
       {repo.dependencies && repo.dependencies.length > 0 && (
         <div className="flex flex-wrap gap-1 items-center">
@@ -1666,6 +1677,7 @@ const excludedRepos = [
   "artyang/ziggystartux",
   "ee7/binary-size",
   "codingonion/hello-algo-rust",
+  "ratfactor/ziglings", // only show the codeberg one
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
