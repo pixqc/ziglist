@@ -1089,16 +1089,19 @@ const zigReposInsert = (parsed) => {
         default_branch = excluded.default_branch,
         language = excluded.language;
   `);
-  const ftsStmt = db.prepare(`
-    INSERT OR REPLACE INTO zig_repos_fts(full_name, name, owner, description)
+  const ftsDeleteStmt = db.prepare(`
+    DELETE FROM zig_repos_fts WHERE full_name = ?;
+  `);
+  const ftsInsertStmt = db.prepare(`
+    INSERT INTO zig_repos_fts(full_name, name, owner, description)
     VALUES (?, ?, ?, ?);
   `);
-
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
-        ftsStmt.run(row[0], row[1], row[2], row[3]);
+        ftsDeleteStmt.run(row[0]);
+        ftsInsertStmt.run(row[0], row[1], row[2], row[3]);
       }
     });
     const rows = parsed.map((item) => [
