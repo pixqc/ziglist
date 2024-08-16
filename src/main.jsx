@@ -838,7 +838,7 @@ app.get("/search", (c) => {
 
 app.get("/dependencies", (c) => {
   const stmt = db.prepare(`
-    SELECT 
+    SELECT
       zrd.full_name,
       JSON_GROUP_ARRAY(
         JSON_OBJECT(
@@ -849,11 +849,11 @@ app.get("/dependencies", (c) => {
           'hash', CASE WHEN zrd.dependency_type = 'url' THEN zrd.url_dependency_hash ELSE NULL END
         )
       ) AS dependencies
-    FROM 
+    FROM
       zig_repo_dependencies zrd
-    LEFT JOIN 
+    LEFT JOIN
       url_dependencies ud ON zrd.url_dependency_hash = ud.hash
-    GROUP BY 
+    GROUP BY
       zrd.full_name
     `);
 
@@ -1556,7 +1556,7 @@ const R2 = new S3Client({
 
 // R2 healthcheck
 if (IS_PROD) {
-  const sqliteBackup = "backup-2024-08-15T12:00:00.002Z.sqlite";
+  const sqliteBackup = "backup-2024-08-16T00_00_00.002Z.sqlite";
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
     const localOutFile = await Deno.open("db.sqlite", {
