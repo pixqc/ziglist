@@ -445,6 +445,9 @@ const Navigation = ({ currentPath, query }) => {
 
   return (
     <>
+      <div className="sm:hidden w-full px-3 mb-3">
+        <SearchBar query={query} />
+      </div>
       <div className="max-w-5xl mx-auto px-3 flex space-x-4 items-center">
         <a
           href="/"
@@ -487,9 +490,6 @@ const Navigation = ({ currentPath, query }) => {
         <div className="hidden sm:block w-full max-w-xs">
           <SearchBar query={query} />
         </div>
-      </div>
-      <div className="sm:hidden w-full px-3 mt-1">
-        <SearchBar query={query} />
       </div>
     </>
   );
