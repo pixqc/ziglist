@@ -3,7 +3,6 @@ import { Database } from "sqlite";
 import { z } from "zod";
 import { S3Client } from "s3";
 import { Hono } from "hono";
-import { serveStatic } from "hono/deno";
 
 // TODO:
 // - emtpy state for search and 404
@@ -535,7 +534,7 @@ const BaseLayout = ({ children }) => (
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>ziglist.org</title>
-        <link rel="stylesheet" href="/assets/tailwind.css" />
+        <style dangerouslySetInnerHTML={{ __html: tailwindcss }} />
       </head>
       <body className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
         {children}
@@ -605,7 +604,6 @@ const DependencyList = ({ deps }) => {
 // routes
 
 const app = new Hono();
-app.use("/assets/*", serveStatic({ root: "./" }));
 
 app.use("*", async (c, next) => {
   const start = Date.now();
@@ -880,10 +878,6 @@ app.get("/dependencies", (c) => {
 
 const Page404 = () => (
   <div className="p-3 max-w-sm mx-auto">
-    <img
-      src="./assets/zero.webp"
-      alt="404 Error"
-    />
     <p className="text-sm text-stone-500 dark:text-stone-400">
       Page not found. Back to{"  "}
       <a
@@ -891,12 +885,6 @@ const Page404 = () => (
         className="hover:underline"
       >
         ziglist.org
-      </a>
-    </p>
-    <p className="text-sm text-stone-500 dark:text-stone-400">
-      Image courtesy:{"  "}
-      <a href="https://ziglings.org" className="hover:underline">
-        ziglings.org
       </a>
     </p>
   </div>
@@ -1648,20 +1636,16 @@ db.exec(`
       full_name,
       tokenize = "unicode61 remove_diacritics 2 tokenchars '._-' separators '/'",
   );
-
   INSERT INTO zig_repos_fts(full_name, name, owner)
     SELECT full_name, name, owner
     FROM zig_repos;
-
   CREATE TRIGGER IF NOT EXISTS zig_repos_ai AFTER INSERT ON zig_repos BEGIN
     INSERT INTO zig_repos_fts(full_name, name, owner)
     VALUES (NEW.full_name, NEW.name, NEW.owner);
   END;
-
   CREATE TRIGGER IF NOT EXISTS zig_repos_ad AFTER DELETE ON zig_repos BEGIN
     DELETE FROM zig_repos_fts WHERE full_name = OLD.full_name;
   END;
-
   CREATE TRIGGER IF NOT EXISTS zig_repos_au AFTER UPDATE ON zig_repos BEGIN
     UPDATE zig_repos_fts SET
       full_name = NEW.full_name,
@@ -1745,8 +1729,9 @@ try {
   fatal(`healthcheck - database is not working: ${e}`);
 }
 
+let tailwindcss;
 try {
-  const _ = Deno.readTextFileSync("./assets/tailwind.css");
+  tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
   logger.info("healthcheck - tailwind.css is loaded");
 } catch (e) {
   fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
