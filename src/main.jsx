@@ -221,6 +221,7 @@ const LucideGithub = () => (
     <path d="M9 18c-4.51 2-5-2-7-2" />
   </svg>
 );
+
 const LucideSearch = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -236,6 +237,25 @@ const LucideSearch = () => (
   >
     <circle cx="11" cy="11" r="8" />
     <path d="m21 21-4.3-4.3" />
+  </svg>
+);
+
+const LucideCircleOff = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="24"
+    height="24"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    class="lucide lucide-circle-off"
+  >
+    <path d="m2 2 20 20" />
+    <path d="M8.35 2.69A10 10 0 0 1 21.3 15.65" />
+    <path d="M19.08 19.08A10 10 0 1 1 4.92 4.92" />
   </svg>
 );
 
@@ -600,6 +620,15 @@ const DependencyList = ({ deps }) => {
   );
 };
 
+const NoItems = () => (
+  <div className="max-w-5xl mx-auto px-3 py-56 flex flex-col items-center space-y-4">
+    <LucideCircleOff />
+    <p className="text-sm text-stone-400 dark:text-stone-500">
+      No results found.
+    </p>
+  </div>
+);
+
 // ----------------------------------------------------------------------------
 // routes
 
@@ -633,6 +662,18 @@ app.get("/", (c) => {
 
   const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
+
+  if (repos.length === 0) {
+    return c.html(
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/"} query={undefined} />
+        <NoItems />
+        <Footer />
+      </BaseLayout>,
+    );
+  }
 
   repos.forEach((repo) => {
     if (repo.dependencies == null) repo.dependencies = [];
@@ -675,6 +716,18 @@ app.get("/new", (c) => {
   `);
   const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
+
+  if (repos.length === 0) {
+    return c.html(
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/"} query={undefined} />
+        <NoItems />
+        <Footer />
+      </BaseLayout>,
+    );
+  }
 
   repos.forEach((repo) => {
     if (repo.dependencies == null) repo.dependencies = [];
@@ -724,6 +777,18 @@ app.get("/top", (c) => {
   `);
   const repos = stmt.all(...excludedRepos, perPage, offset);
   stmt.finalize();
+
+  if (repos.length === 0) {
+    return c.html(
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/"} query={undefined} />
+        <NoItems />
+        <Footer />
+      </BaseLayout>,
+    );
+  }
 
   repos.forEach((repo) => {
     if (repo.dependencies == null) repo.dependencies = [];
@@ -778,9 +843,7 @@ app.get("/search", (c) => {
           <Header />
           <Hero />
           <Navigation currentPath={"/search"} query={query} />
-          <div className="max-w-5xl mx-auto px-3 py-6">
-            <RepoGrid repos={[]} currentPath="/search" page={page} />
-          </div>
+          <NoItems />
           <Footer />
         </BaseLayout>,
       </BaseLayout>,
@@ -882,7 +945,7 @@ const Page404 = () => (
       Page not found. Back to{"  "}
       <a
         href="/"
-        className="hover:underline"
+        className="hover:text-stone-900 dark:hover:text-stone-100 transition-colors"
       >
         ziglist.org
       </a>
