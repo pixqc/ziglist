@@ -6,7 +6,7 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/deno";
 
 // TODO:
-// - fuzzy/full text search, /all
+// - emtpy state for search and 404
 
 // ----------------------------------------------------------------------------
 // utils
@@ -886,12 +886,12 @@ const Page404 = () => (
     />
     <p className="text-sm text-stone-500 dark:text-stone-400">
       Page not found. Back to{"  "}
-    <a
-      href="/"
+      <a
+        href="/"
         className="hover:underline"
-    >
-      ziglist.org
-    </a>
+      >
+        ziglist.org
+      </a>
     </p>
     <p className="text-sm text-stone-500 dark:text-stone-400">
       Image courtesy:{"  "}
@@ -1595,7 +1595,7 @@ if (IS_PROD) {
   }
 }
 
-const db = new Database("db.sqlite");
+const db = new Database("testing.sqlite");
 db.exec(`
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS zig_repos (
@@ -1643,29 +1643,30 @@ db.exec(`
 
   -- Full text search
   CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
-    full_name, 
-    name, 
-    owner, 
-    description, 
-    homepage
+      owner, 
+      name,
+      full_name,
+      tokenize = "unicode61 remove_diacritics 2 tokenchars '._-' separators '/'",
   );
-  INSERT INTO zig_repos_fts(full_name, name, owner, description, homepage)
-    SELECT full_name, name, owner, description, homepage
+
+  INSERT INTO zig_repos_fts(full_name, name, owner)
+    SELECT full_name, name, owner
     FROM zig_repos;
+
   CREATE TRIGGER IF NOT EXISTS zig_repos_ai AFTER INSERT ON zig_repos BEGIN
-    INSERT INTO zig_repos_fts(full_name, name, owner, description, homepage)
-    VALUES (NEW.full_name, NEW.name, NEW.owner, NEW.description, NEW.homepage);
+    INSERT INTO zig_repos_fts(full_name, name, owner)
+    VALUES (NEW.full_name, NEW.name, NEW.owner);
   END;
+
   CREATE TRIGGER IF NOT EXISTS zig_repos_ad AFTER DELETE ON zig_repos BEGIN
     DELETE FROM zig_repos_fts WHERE full_name = OLD.full_name;
   END;
+
   CREATE TRIGGER IF NOT EXISTS zig_repos_au AFTER UPDATE ON zig_repos BEGIN
     UPDATE zig_repos_fts SET
       full_name = NEW.full_name,
       name = NEW.name,
-      owner = NEW.owner,
-      description = NEW.description,
-      homepage = NEW.homepage
+      owner = NEW.owner
     WHERE full_name = OLD.full_name;
   END;
 `);
@@ -1745,7 +1746,7 @@ try {
 }
 
 try {
-  tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
+  const _ = Deno.readTextFileSync("./assets/tailwind.css");
   logger.info("healthcheck - tailwind.css is loaded");
 } catch (e) {
   fatal(`healthcheck - tailwind.css is not loaded: ${e}`);
