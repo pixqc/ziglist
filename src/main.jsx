@@ -283,9 +283,8 @@ const SpecialCard = () => {
         More features coming soon!
       </h3>
       <p className="text-sm text-stone-700 dark:text-stone-300 mb-2">
-        Codeberg+GitLab support, zigmod+gyro support, dependency graph, etc.
-        Feature requests? Missing dependencies in one of the pkgs/projects? Let
-        me know!
+        GitLab support, zigmod+gyro support, dependency graph, etc. Feature
+        requests? Missing dependencies in one of the pkgs/projects? Let me know!
       </p>
       <div className="grow" />
       <a
