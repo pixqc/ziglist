@@ -1004,6 +1004,53 @@ const SchemaRepo = z.object({
   ...rest,
 }));
 
+const SchemaRepoCodeberg = z.object({
+  name: z.string(),
+  full_name: z.string(),
+  owner: z.object({
+    login: z.string(),
+  }),
+  description: z.string().nullish(),
+  language: z.string().nullish(),
+  stars_count: z.number(),
+  fork: z.boolean(),
+  forks_count: z.number(),
+  created_at: z.string().transform((dateString) =>
+    Math.floor(new Date(dateString).getTime() / 1000)
+  ),
+  updated_at: z.string().transform((dateString) =>
+    Math.floor(new Date(dateString).getTime() / 1000)
+  ),
+  license: z.object({
+    spdx_id: z.string(),
+  }).nullish(),
+  homepage: z.string().nullish(),
+  default_branch: z.string(),
+}).transform((
+  {
+    full_name,
+    owner,
+    license,
+    stars_count,
+    forks_count,
+    homepage,
+    fork,
+    updated_at,
+    ...rest
+  },
+) => ({
+  full_name: "codeberg:" + full_name,
+  owner: owner.login,
+  license: license?.spdx_id || null,
+  stars: stars_count,
+  forks: forks_count,
+  homepage: homepage || null,
+  pushed_at: updated_at,
+  updated_at: updated_at,
+  is_fork: fork,
+  ...rest,
+}));
+
 /**
  * @param {z.infer<typeof SchemaRepo>[]} parsed
  */
@@ -1088,33 +1135,33 @@ function createGetAllQuery() {
   const ZIG_INIT = new Date("2015-07-04");
 
   const weeksSinceInit = [
-      113,
-      188,
-      236,
-      268,
-      295,
-      317,
-      337,
-      354,
-      369,
-      385,
-      399,
-      411,
-      421,
-      430,
-      439,
-      446,
-      454,
-      461,
-      467,
-    ];
+    113,
+    188,
+    236,
+    268,
+    295,
+    317,
+    337,
+    354,
+    369,
+    385,
+    399,
+    411,
+    421,
+    430,
+    439,
+    446,
+    454,
+    461,
+    467,
+  ];
 
   let index = 0;
   let monthsAfterLast = 0;
-    const last = addWeeks(
+  const last = addWeeks(
     ZIG_INIT,
     weeksSinceInit[weeksSinceInit.length - 1],
-    );
+  );
 
   return function getAllQuery() {
     let query;
@@ -1145,16 +1192,19 @@ function createGetAllQuery() {
 const getAllQuery = createGetAllQuery();
 
 /**
- * @param {'top' | 'all'} type
+ * @param {'top' | 'all' | 'codeberg:all'} type
  * @returns {string}
  */
 const zigReposURLMake = (type) => {
-  const base = "https://api.github.com/search/repositories";
+  let base = "https://api.github.com/search/repositories";
   let query;
   if (type === "top") {
     query = "language:zig";
   } else if (type === "all") {
     query = getAllQuery();
+  } else if (type === "codeberg:all") {
+    base = "https://codeberg.org/api/v1/repos/search";
+    query = "zig";
   } else {
     logger.error(`zigReposURLMake - invalid type: ${type}`);
     fatal(`zigReposURLMake - invalid type ${typeof type}`);
@@ -1162,6 +1212,9 @@ const zigReposURLMake = (type) => {
 
   // @ts-ignore - query is always defined
   const encodedQuery = encodeURIComponent(query);
+  if (type.startsWith("codeberg:")) {
+    return `${base}?q=${encodedQuery}&includeDesc=true&page=1&limit=50`;
+  }
   return `${base}?q=${encodedQuery}&per_page=100&page=1`;
 };
 
@@ -1174,7 +1227,9 @@ const zigReposURLMake = (type) => {
  * }>}
  */
 const zigReposFetch = async (url) => {
-  const response = await fetch(url, { headers: githubHeaders });
+  let header = githubHeaders;
+  if (url.startsWith("https://codeberg.org")) header = codebergHeaders;
+  const response = await fetch(url, { headers: header });
   let next;
   const linkHeader = response.headers.get("link");
   if (linkHeader) {
@@ -1183,8 +1238,12 @@ const zigReposFetch = async (url) => {
     );
     next = nextLink?.match(/<(.*)>/)?.[1];
   }
+  // messy...
   const data = await response.json();
-  const items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
+  let items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
+  if (url.startsWith("https://codeberg.org")) {
+    items = Array.isArray(data.data) ? data.data.filter(Boolean) : [];
+  }
   return {
     status: response.status,
     items,
@@ -1193,23 +1252,28 @@ const zigReposFetch = async (url) => {
 };
 
 /**
- * @param {'top' | 'all'} type
+ * @param {'top' | 'all' | 'codeberg:all'} type
  * @returns {Promise<void>}
  */
 const zigReposFetchInsert = async (type) => {
   /** @type {string | undefined} */
   let url = zigReposURLMake(type);
-  const parsed = [];
+  let schema = SchemaRepo;
+  let schemaName = "SchemaRepo";
+  // @ts-ignore - i know what im doing
+  if (type === "codeberg:all") schema = SchemaRepoCodeberg;
+  if (type === "codeberg:all") schemaName = "SchemaRepoCodeberg";
 
+  const parsed = [];
   while (url) {
     const res = await zigReposFetch(url);
     logger.info(`zigReposFetch - status ${res.status} - ${url}`);
     for (const item of res.items) {
       try {
-        const parsedItem = SchemaRepo.parse(item);
+        const parsedItem = schema.parse(item);
         parsed.push(parsedItem);
       } catch (e) {
-        logger.error("SchemaRepo.parse", {
+        logger.error(`${schemaName}.parse`, {
           fullName: item.full_name,
           error: e,
         });
@@ -1620,6 +1684,12 @@ const githubHeaders = {
   Authorization: `Bearer ${GITHUB_API_KEY}`,
 };
 
+const CODEBERG_API_KEY = Deno.env.get("CODEBERG_API_KEY");
+if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
+const codebergHeaders = {
+  Authorization: `token ${CODEBERG_API_KEY}`,
+};
+
 const R2_ENDPOINT = Deno.env.get("R2_ENDPOINT");
 const R2_ACCESS_KEY_ID = Deno.env.get("R2_ACCESS_KEY_ID");
 const R2_SECRET_ACCESS_KEY = Deno.env.get("R2_SECRET_ACCESS_KEY");
@@ -1781,6 +1851,14 @@ fetch("https://api.github.com/zen", {
   fatal(`healthcheck - GitHub API key is invalid: ${e}`);
 });
 
+fetch("https://codeberg.org/api/v1/repos/ziglings/exercises/commits?limit=1", {
+  headers: codebergHeaders,
+}).then(() => {
+  logger.info("healthcheck - CODEBERG_API_KEY is valid and usable");
+}).catch((e) => {
+  fatal(`healthcheck - Codeberg API key is invalid: ${e}`);
+});
+
 try {
   db.prepare("SELECT COUNT(*) FROM zig_repos").get();
   logger.info("healthcheck - database is working");
@@ -1862,10 +1940,11 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
-zigReposFetchInsert("top");
-updateIncludedRepos();
-zigBuildFetchInsert();
-Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-Deno.cron("backup", "0 0,12 * * *", backup);
+zigReposFetchInsert("codeberg:all");
+// zigReposFetchInsert("top");
+// updateIncludedRepos();
+// zigBuildFetchInsert();
+// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+// Deno.cron("backup", "0 0,12 * * *", backup);
