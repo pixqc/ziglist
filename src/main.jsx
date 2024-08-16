@@ -5,7 +5,7 @@ import { S3Client } from "s3";
 import { Hono } from "hono";
 
 // TODO:
-// - emtpy state for search and 404
+// -
 
 // ----------------------------------------------------------------------------
 // utils
@@ -485,17 +485,23 @@ const Navigation = ({ currentPath, query }) => {
   );
 };
 
-const Pagination = ({ currentPath, page }) => {
+const Pagination = ({ currentPath, page, query }) => {
   const prevPage = Math.max(1, page - 1);
   const nextPage = page + 1;
   const linkStyles =
     "px-2 py-2 flex items-center text-stone-400 dark:text-stone-500 hover:text-stone-900 dark:hover:text-stone-100 transition-colors";
-
+  const getPageUrl = (pageNum) => {
+    let url = `${currentPath}?page=${pageNum}`;
+    if (query) {
+      url += `&q=${encodeURIComponent(query)}`;
+    }
+    return url;
+  };
   return (
     <nav className="flex justify-center mb-6">
       <div className="flex items-center space-x-4">
         <a
-          href={`${currentPath}?page=${prevPage}`}
+          href={getPageUrl(prevPage)}
           className={`${linkStyles} ${
             page === 1 ? "pointer-events-none opacity-50" : ""
           }`}
@@ -505,7 +511,7 @@ const Pagination = ({ currentPath, page }) => {
           Prev
         </a>
         <a
-          href={`${currentPath}?page=${nextPage}`}
+          href={getPageUrl(nextPage)}
           className={linkStyles}
         >
           Next
@@ -690,7 +696,7 @@ app.get("/", (c) => {
         <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
       </div>
       {typeof page === "number" && page > 0 && (
-        <Pagination page={page} currentPath={"/"} />
+        <Pagination page={page} currentPath={"/"} query={undefined} />
       )}
       <Footer />
     </BaseLayout>,
@@ -749,7 +755,7 @@ app.get("/new", (c) => {
           />
         </div>
         {typeof page === "number" && page > 0 && (
-          <Pagination page={page} currentPath={"/new"} />
+          <Pagination page={page} currentPath={"/new"} query={undefined} />
         )}
         <Footer />
       </BaseLayout>,
@@ -809,7 +815,9 @@ app.get("/top", (c) => {
             page={page}
           />
         </div>
-        {page > 0 && <Pagination page={page} currentPath={"/top"} />}
+        {page > 0 && (
+          <Pagination page={page} currentPath={"/top"} query={undefined} />
+        )}
         <Footer />
       </BaseLayout>,
     </BaseLayout>,
@@ -821,54 +829,38 @@ app.get("/search", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const rawQuery = c.req.query("q") || "";
-  const specialChars = /[!-,.-\[\]^_\{\}]/g;
-  const query = rawQuery.replace(specialChars, (char) => `"${char}"`);
+  const query = rawQuery.replace(/[-_]/g, " ");
 
-  const matchStmt = db.prepare(`
-    SELECT full_name
-    FROM zig_repos_fts
-    WHERE zig_repos_fts MATCH ?
-    LIMIT ? OFFSET ?
-  `);
-  const matchedFullNames = matchStmt.all(query, perPage, offset);
-  matchStmt.finalize();
-
-  if (matchedFullNames.length === 0) {
-    logger.info(
-      `GET /search?q=${query}&page=${page} - 0 results from db`,
-    );
+  if (query.trim() === "") {
     return c.html(
       <BaseLayout>
-        <BaseLayout>
-          <Header />
-          <Hero />
-          <Navigation currentPath={"/search"} query={query} />
-          <NoItems />
-          <Footer />
-        </BaseLayout>,
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/search"} query={rawQuery} />
+        <NoItems />
+        <Footer />
       </BaseLayout>,
     );
   }
 
-  const repoStmt = db.prepare(`
-    SELECT
+  const stmt = db.prepare(`
+    SELECT 
       r.*,
       GROUP_CONCAT(d.name) AS dependencies
     FROM zig_repos r
+    JOIN zig_repos_fts fts ON r.full_name = fts.full_name
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
-    WHERE r.full_name IN (${matchedFullNames.map(() => "?").join(", ")})
+    WHERE zig_repos_fts MATCH ?
       AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
       AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
       AND r.full_name NOT IN (${excludedRepos.map(() => "?").join(", ")})
     GROUP BY r.full_name
+    ORDER BY r.stars DESC
+    LIMIT ? OFFSET ?
   `);
 
-  const repos = repoStmt.all(
-    ...matchedFullNames.map((m) => m.full_name),
-    ...excludedRepos,
-  );
-  repoStmt.finalize();
-
+  const repos = stmt.all(query, ...excludedRepos, perPage, offset);
+  stmt.finalize();
   repos.forEach((repo) => {
     if (repo.dependencies == null) repo.dependencies = [];
     else repo.dependencies = repo.dependencies.split(",");
@@ -876,15 +868,27 @@ app.get("/search", (c) => {
 
   // this is wrong btw, it's not escaping the query
   logger.info(
-    `GET /search?q=${query}&page=${page} - ${repos.length} results from db`,
+    `GET /search?q=${rawQuery}&page=${page} - ${repos.length} results from db`,
   );
+
+  if (repos.length === 0) {
+    return c.html(
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/"} query={rawQuery} />
+        <NoItems />
+        <Footer />
+      </BaseLayout>,
+    );
+  }
 
   return c.html(
     <BaseLayout>
       <BaseLayout>
         <Header />
         <Hero />
-        <Navigation currentPath={"/search"} query={query} />
+        <Navigation currentPath={"/search"} query={rawQuery} />
         <div className="max-w-5xl mx-auto px-3 py-6">
           <RepoGrid
             repos={Object.values(repos)}
@@ -892,7 +896,9 @@ app.get("/search", (c) => {
             page={page}
           />
         </div>
-        {page > 0 && <Pagination page={page} currentPath={"/search"} />}
+        {page > 0 && (
+          <Pagination page={page} currentPath={"/search"} query={rawQuery} />
+        )}
         <Footer />
       </BaseLayout>,
     </BaseLayout>,
@@ -1693,27 +1699,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
 
   -- Full text search
+  DROP TABLE IF EXISTS zig_repos_fts;
   CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
-      owner, 
-      name,
-      full_name,
-      tokenize = "unicode61 remove_diacritics 2 tokenchars '._-' separators '/'",
+    owner, 
+    name,
+    full_name,
+    description
   );
-  INSERT INTO zig_repos_fts(full_name, name, owner)
-    SELECT full_name, name, owner
+  INSERT INTO zig_repos_fts(full_name, name, owner, description)
+    SELECT full_name, name, owner, description
     FROM zig_repos;
+  DROP TRIGGER IF EXISTS zig_repos_ai;
   CREATE TRIGGER IF NOT EXISTS zig_repos_ai AFTER INSERT ON zig_repos BEGIN
-    INSERT INTO zig_repos_fts(full_name, name, owner)
-    VALUES (NEW.full_name, NEW.name, NEW.owner);
+    INSERT INTO zig_repos_fts(full_name, name, owner, description)
+    VALUES (NEW.full_name, NEW.name, NEW.owner, NEW.description);
   END;
+  DROP TRIGGER IF EXISTS zig_repos_ad;
   CREATE TRIGGER IF NOT EXISTS zig_repos_ad AFTER DELETE ON zig_repos BEGIN
     DELETE FROM zig_repos_fts WHERE full_name = OLD.full_name;
   END;
+  DROP TRIGGER IF EXISTS zig_repos_au;
   CREATE TRIGGER IF NOT EXISTS zig_repos_au AFTER UPDATE ON zig_repos BEGIN
     UPDATE zig_repos_fts SET
       full_name = NEW.full_name,
       name = NEW.name,
-      owner = NEW.owner
+      owner = NEW.owner,
+      description = NEW.description
     WHERE full_name = OLD.full_name;
   END;
 `);
