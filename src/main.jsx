@@ -1042,10 +1042,16 @@ const zigReposInsert = (parsed) => {
         default_branch = excluded.default_branch,
         language = excluded.language;
   `);
+  const ftsStmt = db.prepare(`
+    INSERT OR REPLACE INTO zig_repos_fts(full_name, name, owner, description)
+    VALUES (?, ?, ?, ?);
+  `);
+
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
+        ftsStmt.run(row[0], row[1], row[2], row[3]);
       }
     });
     const rows = parsed.map((item) => [
@@ -1709,24 +1715,6 @@ db.exec(`
   INSERT INTO zig_repos_fts(full_name, name, owner, description)
     SELECT full_name, name, owner, description
     FROM zig_repos;
-  DROP TRIGGER IF EXISTS zig_repos_ai;
-  CREATE TRIGGER IF NOT EXISTS zig_repos_ai AFTER INSERT ON zig_repos BEGIN
-    INSERT INTO zig_repos_fts(full_name, name, owner, description)
-    VALUES (NEW.full_name, NEW.name, NEW.owner, NEW.description);
-  END;
-  DROP TRIGGER IF EXISTS zig_repos_ad;
-  CREATE TRIGGER IF NOT EXISTS zig_repos_ad AFTER DELETE ON zig_repos BEGIN
-    DELETE FROM zig_repos_fts WHERE full_name = OLD.full_name;
-  END;
-  DROP TRIGGER IF EXISTS zig_repos_au;
-  CREATE TRIGGER IF NOT EXISTS zig_repos_au AFTER UPDATE ON zig_repos BEGIN
-    UPDATE zig_repos_fts SET
-      full_name = NEW.full_name,
-      name = NEW.name,
-      owner = NEW.owner,
-      description = NEW.description
-    WHERE full_name = OLD.full_name;
-  END;
 `);
 
 // older Zig projects don't use zon files to list their dependencies
