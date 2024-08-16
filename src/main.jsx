@@ -860,6 +860,7 @@ app.get("/dependencies", (c) => {
   const deps = stmt.all();
   stmt.finalize();
 
+  logger.info(`GET /dependencies - ${deps.length} results from db`);
   return c.html(
     <BaseLayout>
       <BaseLayout>
