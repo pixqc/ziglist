@@ -387,7 +387,7 @@ const Header = () => (
   </header>
 );
 
-const SearchBar = () => (
+const SearchBar = ({ query }) => (
   <form action="/search" method="get">
     <div className="relative">
       <input
@@ -395,6 +395,7 @@ const SearchBar = () => (
         placeholder="search..."
         type="text"
         name="q"
+        value={query}
       />
       <button
         type="submit"
@@ -406,7 +407,7 @@ const SearchBar = () => (
   </form>
 );
 
-const Navigation = ({ currentPath }) => {
+const Navigation = ({ currentPath, query }) => {
   const textActive = "text-stone-900 dark:text-stone-100";
   const textDisabled = "text-stone-400 dark:text-stone-500";
   const linkStyle =
@@ -454,11 +455,11 @@ const Navigation = ({ currentPath }) => {
         </div>
 
         <div className="hidden sm:block w-full max-w-xs">
-          <SearchBar />
+          <SearchBar query={query} />
         </div>
       </div>
       <div className="sm:hidden w-full px-3 mt-1">
-        <SearchBar />
+        <SearchBar query={query} />
       </div>
     </>
   );
@@ -525,7 +526,7 @@ const Footer = () => (
   </div>
 );
 
-const BaseLayout = ({ children, currentPath, page }) => (
+const BaseLayout = ({ children }) => (
   <>
     {"<!DOCTYPE html>"}
     <html lang="en" className="dark">
@@ -536,18 +537,7 @@ const BaseLayout = ({ children, currentPath, page }) => (
         <style dangerouslySetInnerHTML={{ __html: tailwindcss }} />
       </head>
       <body className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
-        <Header />
-        <Hero />
-        <Navigation currentPath={currentPath} />
-        <div className="max-w-5xl mx-auto px-3 py-6">
-          <div>
-            {children}
-          </div>
-        </div>
-        {typeof page === "number" && page > 0 && (
-          <Pagination page={page} currentPath={currentPath} />
-        )}
-        <Footer />
+        {children}
       </body>
     </html>
   </>
@@ -651,8 +641,17 @@ app.get("/", (c) => {
 
   logger.info(`GET /?page=${page} - ${repos.length} from db`);
   return c.html(
-    <BaseLayout currentPath="/" page={page}>
-      <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
+    <BaseLayout>
+      <Header />
+      <Hero />
+      <Navigation currentPath={"/"} query={undefined} />
+      <div className="max-w-5xl mx-auto px-3 py-6">
+        <RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
+      </div>
+      {typeof page === "number" && page > 0 && (
+        <Pagination page={page} currentPath={"/"} />
+      )}
+      <Footer />
     </BaseLayout>,
   );
 });
@@ -684,8 +683,23 @@ app.get("/new", (c) => {
 
   logger.info(`GET /new?page=${page} - ${repos.length} from db`);
   return c.html(
-    <BaseLayout currentPath="/new" page={page}>
-      <RepoGrid repos={Object.values(repos)} currentPath="/new" page={page} />
+    <BaseLayout>
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/new"} query={undefined} />
+        <div className="max-w-5xl mx-auto px-3 py-6">
+          <RepoGrid
+            repos={Object.values(repos)}
+            currentPath="/new"
+            page={page}
+          />
+        </div>
+        {typeof page === "number" && page > 0 && (
+          <Pagination page={page} currentPath={"/new"} />
+        )}
+        <Footer />
+      </BaseLayout>,
     </BaseLayout>,
   );
 });
@@ -718,8 +732,21 @@ app.get("/top", (c) => {
 
   logger.info(`GET /top?page=${page} - ${repos.length} from db`);
   return c.html(
-    <BaseLayout currentPath="/top" page={page}>
-      <RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
+    <BaseLayout>
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/top"} query={undefined} />
+        <div className="max-w-5xl mx-auto px-3 py-6">
+          <RepoGrid
+            repos={Object.values(repos)}
+            currentPath="/top"
+            page={page}
+          />
+        </div>
+        {page > 0 && <Pagination page={page} currentPath={"/top"} />}
+        <Footer />
+      </BaseLayout>,
     </BaseLayout>,
   );
 });
@@ -728,9 +755,9 @@ app.get("/search", (c) => {
   const perPage = 30;
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
-  const searchQuery = c.req.query("q") || "";
+  const rawQuery = c.req.query("q") || "";
   const specialChars = /[!-,.-\[\]^_\{\}]/g;
-  const escapedQuery = searchQuery.replace(specialChars, (char) => `"${char}"`);
+  const query = rawQuery.replace(specialChars, (char) => `"${char}"`);
 
   const matchStmt = db.prepare(`
     SELECT full_name
@@ -738,16 +765,24 @@ app.get("/search", (c) => {
     WHERE zig_repos_fts MATCH ?
     LIMIT ? OFFSET ?
   `);
-  const matchedFullNames = matchStmt.all(escapedQuery, perPage, offset);
+  const matchedFullNames = matchStmt.all(query, perPage, offset);
   matchStmt.finalize();
 
   if (matchedFullNames.length === 0) {
     logger.info(
-      `GET /search?q=${searchQuery}&page=${page} - 0 results from db`,
+      `GET /search?q=${query}&page=${page} - 0 results from db`,
     );
     return c.html(
-      <BaseLayout currentPath="/search" page={page}>
-        <RepoGrid repos={[]} currentPath="/search" page={page} />
+      <BaseLayout>
+        <BaseLayout>
+          <Header />
+          <Hero />
+          <Navigation currentPath={"/search"} query={query} />
+          <div className="max-w-5xl mx-auto px-3 py-6">
+            <RepoGrid repos={[]} currentPath="/search" page={page} />
+          </div>
+          <Footer />
+        </BaseLayout>,
       </BaseLayout>,
     );
   }
@@ -778,16 +813,25 @@ app.get("/search", (c) => {
 
   // this is wrong btw, it's not escaping the query
   logger.info(
-    `GET /search?q=${searchQuery}&page=${page} - ${repos.length} results from db`,
+    `GET /search?q=${query}&page=${page} - ${repos.length} results from db`,
   );
 
   return c.html(
-    <BaseLayout currentPath="/search" page={page}>
-      <RepoGrid
-        repos={Object.values(repos)}
-        currentPath="/search"
-        page={page}
-      />
+    <BaseLayout>
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/search"} query={query} />
+        <div className="max-w-5xl mx-auto px-3 py-6">
+          <RepoGrid
+            repos={Object.values(repos)}
+            currentPath="/top"
+            page={page}
+          />
+        </div>
+        {page > 0 && <Pagination page={page} currentPath={"/search"} />}
+        <Footer />
+      </BaseLayout>,
     </BaseLayout>,
   );
 });
@@ -816,10 +860,17 @@ app.get("/dependencies", (c) => {
   const deps = stmt.all();
   stmt.finalize();
 
-  // -1 to hide pagination
   return c.html(
-    <BaseLayout currentPath="/dependencies" page={-1}>
-      <DependencyList deps={deps} />
+    <BaseLayout>
+      <BaseLayout>
+        <Header />
+        <Hero />
+        <Navigation currentPath={"/dependencies"} query={undefined} />
+        <div className="max-w-5xl mx-auto px-3 py-6">
+          <DependencyList deps={deps} />
+        </div>
+        <Footer />
+      </BaseLayout>,
     </BaseLayout>,
   );
 });
