@@ -1196,15 +1196,16 @@ const getAllQuery = createGetAllQuery();
  * @returns {string}
  */
 const zigReposURLMake = (type) => {
-  let base = "https://api.github.com/search/repositories";
+  const isCodeberg = type.startsWith("codeberg:");
+  const base = isCodeberg
+    ? "https://codeberg.org/api/v1/repos/search"
+    : "https://api.github.com/search/repositories";
   let query;
+
   if (type === "top") {
     query = "language:zig";
-  } else if (type === "all") {
-    query = getAllQuery();
-  } else if (type === "codeberg:all") {
-    base = "https://codeberg.org/api/v1/repos/search";
-    query = "zig";
+  } else if (type === "all" || type === "codeberg:all") {
+    query = isCodeberg ? "zig" : getAllQuery();
   } else {
     logger.error(`zigReposURLMake - invalid type: ${type}`);
     fatal(`zigReposURLMake - invalid type ${typeof type}`);
@@ -1212,7 +1213,7 @@ const zigReposURLMake = (type) => {
 
   // @ts-ignore - query is always defined
   const encodedQuery = encodeURIComponent(query);
-  if (type.startsWith("codeberg:")) {
+  if (isCodeberg) {
     return `${base}?q=${encodedQuery}&includeDesc=true&page=1&limit=50`;
   }
   return `${base}?q=${encodedQuery}&per_page=100&page=1`;
@@ -1227,9 +1228,9 @@ const zigReposURLMake = (type) => {
  * }>}
  */
 const zigReposFetch = async (url) => {
-  let header = githubHeaders;
-  if (url.startsWith("https://codeberg.org")) header = codebergHeaders;
-  const response = await fetch(url, { headers: header });
+  const isCodeberg = url.startsWith("https://codeberg.org");
+  const headers = isCodeberg ? codebergHeaders : githubHeaders;
+  const response = await fetch(url, { headers: headers });
   let next;
   const linkHeader = response.headers.get("link");
   if (linkHeader) {
@@ -1238,12 +1239,9 @@ const zigReposFetch = async (url) => {
     );
     next = nextLink?.match(/<(.*)>/)?.[1];
   }
-  // messy...
   const data = await response.json();
-  let items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
-  if (url.startsWith("https://codeberg.org")) {
-    items = Array.isArray(data.data) ? data.data.filter(Boolean) : [];
-  }
+  let items = isCodeberg ? data.data : data.items;
+  items = Array.isArray(items) ? items.filter(Boolean) : [];
   return {
     status: response.status,
     items,
@@ -1256,13 +1254,12 @@ const zigReposFetch = async (url) => {
  * @returns {Promise<void>}
  */
 const zigReposFetchInsert = async (type) => {
+  const isCodeberg = type.startsWith("codeberg:");
+
   /** @type {string | undefined} */
   let url = zigReposURLMake(type);
-  let schema = SchemaRepo;
-  let schemaName = "SchemaRepo";
-  // @ts-ignore - i know what im doing
-  if (type === "codeberg:all") schema = SchemaRepoCodeberg;
-  if (type === "codeberg:all") schemaName = "SchemaRepoCodeberg";
+  const schema = isCodeberg ? SchemaRepoCodeberg : SchemaRepo;
+  const schemaName = isCodeberg ? "SchemaRepoCodeberg" : "SchemaRepo";
 
   const parsed = [];
   while (url) {
@@ -1940,8 +1937,6 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
-zigReposFetchInsert("codeberg:all");
-// zigReposFetchInsert("top");
 // updateIncludedRepos();
 // zigBuildFetchInsert();
 // Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
