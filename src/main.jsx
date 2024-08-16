@@ -1437,8 +1437,25 @@ const zigRepoDependenciesInsert = (parsed) => {
  * @returns {string}
  */
 const zigBuildURLMake = (full_name, default_branch, type) => {
-  const base = "https://raw.githubusercontent.com";
-  let url = `${base}/${full_name}/${default_branch}`;
+  const isCodeberg = full_name.startsWith("codeberg:");
+  let base;
+  let cleanFullName;
+
+  if (isCodeberg) {
+    base = "https://codeberg.org";
+    cleanFullName = full_name.replace("codeberg:", "");
+  } else {
+    base = "https://raw.githubusercontent.com";
+    cleanFullName = full_name;
+  }
+
+  let url;
+  if (isCodeberg) {
+    url = `${base}/${cleanFullName}/raw/branch/${default_branch}`;
+  } else {
+    url = `${base}/${cleanFullName}/${default_branch}`;
+  }
+
   if (type === "zon") {
     url = `${url}/build.zig.zon`;
   } else if (type === "zig") {
@@ -1937,9 +1954,15 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
-// updateIncludedRepos();
-// zigBuildFetchInsert();
-// Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
-// Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
-// Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
-// Deno.cron("backup", "0 0,12 * * *", backup);
+updateIncludedRepos();
+zigBuildFetchInsert();
+zigReposFetchInsert("codeberg:all");
+Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
+Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
+Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
+Deno.cron(
+  "codeberg zigReposFetchInsert",
+  "0 */3 * * *",
+  () => zigReposFetchInsert("codeberg:all"),
+);
+Deno.cron("backup", "0 0,12 * * *", backup);
