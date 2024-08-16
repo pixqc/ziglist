@@ -584,7 +584,7 @@ app.get("/", (c) => {
   const stmt = db.prepare(`
     SELECT
       r.*,
-      json_group_array(d.name) AS dependencies
+      GROUP_CONCAT(d.name) AS dependencies
     FROM zig_repos r
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
     WHERE r.stars >= 10 AND r.forks >= 10
@@ -600,9 +600,8 @@ app.get("/", (c) => {
   stmt.finalize();
 
   repos.forEach((repo) => {
-    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
-      dep !== null
-    );
+    if (repo.dependencies == null) repo.dependencies = [];
+    else repo.dependencies = repo.dependencies.split(",");
   });
 
   logger.info(`GET /?page=${page} - ${repos.length} from db`);
@@ -620,7 +619,7 @@ app.get("/new", (c) => {
   const stmt = db.prepare(`
     SELECT
       r.*,
-      json_group_array(d.name) AS dependencies
+      GROUP_CONCAT(d.name) AS dependencies
     FROM zig_repos r
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
     WHERE r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
@@ -634,9 +633,8 @@ app.get("/new", (c) => {
   stmt.finalize();
 
   repos.forEach((repo) => {
-    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
-      dep !== null
-    );
+    if (repo.dependencies == null) repo.dependencies = [];
+    else repo.dependencies = repo.dependencies.split(",");
   });
 
   logger.info(`GET /new?page=${page} - ${repos.length} from db`);
@@ -654,7 +652,7 @@ app.get("/top", (c) => {
   const stmt = db.prepare(`
     SELECT
       r.*,
-      json_group_array(d.name) AS dependencies
+      GROUP_CONCAT(d.name) AS dependencies
     FROM zig_repos r
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
     WHERE r.forks >= 10
@@ -669,9 +667,8 @@ app.get("/top", (c) => {
   stmt.finalize();
 
   repos.forEach((repo) => {
-    repo.dependencies = JSON.parse(repo.dependencies).filter((dep) =>
-      dep !== null
-    );
+    if (repo.dependencies == null) repo.dependencies = [];
+    else repo.dependencies = repo.dependencies.split(",");
   });
 
   logger.info(`GET /top?page=${page} - ${repos.length} from db`);
@@ -711,7 +708,7 @@ app.get("/search", (c) => {
   const repoStmt = db.prepare(`
     SELECT
       r.*,
-      json_group_array(d.name) AS dependencies
+      GROUP_CONCAT(d.name) AS dependencies
     FROM zig_repos r
     LEFT JOIN zig_repo_dependencies d ON r.full_name = d.full_name
     WHERE r.full_name IN (${matchedFullNames.map(() => "?").join(", ")})
@@ -726,8 +723,10 @@ app.get("/search", (c) => {
     ...excludedRepos,
   );
   repoStmt.finalize();
+
   repos.forEach((repo) => {
-    if (repo.dependencies[0] === null) repo.dependencies = [];
+    if (repo.dependencies == null) repo.dependencies = [];
+    else repo.dependencies = repo.dependencies.split(",");
   });
 
   logger.info(
