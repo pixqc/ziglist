@@ -1581,6 +1581,8 @@ const excludedRepos = [
   "jeedom-zigate/jeedom-plugin-zigate",
   "isdrupter/ziggystartux",
   "artyang/ziggystartux",
+  "ee7/binary-size",
+  "codingonion/hello-algo-rust",
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
