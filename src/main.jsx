@@ -879,17 +879,26 @@ app.get("/dependencies", (c) => {
 });
 
 const Page404 = () => (
-  <div className="p-3 max-w-5xl mx-auto items-center w-full flex flex-col items-center">
+  <div className="p-3 max-w-sm mx-auto">
+    <img
+      src="./assets/zero.webp"
+      alt="404 Error"
+    />
+    <p className="text-sm text-stone-500 dark:text-stone-400">
+      Page not found. Back to{"  "}
     <a
       href="/"
-      className="text-stone-900 dark:text-stone-100 hover:underline mb-4"
+        className="hover:underline"
     >
       ziglist.org
     </a>
-    <img
-      src="./assets/ziglings.jpg"
-      alt="404 Error"
-    />
+    </p>
+    <p className="text-sm text-stone-500 dark:text-stone-400">
+      Image courtesy:{"  "}
+      <a href="https://ziglings.org" className="hover:underline">
+        ziglings.org
+      </a>
+    </p>
   </div>
 );
 
