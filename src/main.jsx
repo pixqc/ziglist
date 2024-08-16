@@ -1069,15 +1069,7 @@ const zigReposInsert = (parsed) => {
   }
 };
 
-// ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
-const ZIG_INITIAL_COMMIT = new Date("2015-07-04");
-let monthsAfterLast = 0;
-let currentWeekIncrementIndex = 0;
-
 /**
- * zigReposURLMake("top") fetches popular zig repos
- * zigReposURLMake("all") is the meat of the program, fetches everything
- *
  * invariants: github repo search api returns 1k items at most,
  * the interval between these weeks are handpicked to fetch the most stuff
  * while not crossing the 1k limit
@@ -1089,17 +1081,13 @@ let currentWeekIncrementIndex = 0;
  * 17-09-02T00%3A00%3A00Z&per_page=100&page=1
  *
  * this is guaranteed to have 983 items, 113 weeks since zig init commit
- *
- * @param {'top' | 'all'} type
- * @returns {string}
  */
-const zigReposURLMake = (type) => {
-  const base = "https://api.github.com/search/repositories";
-  let query;
-  if (type === "top") {
-    query = "language:zig";
-  } else if (type === "all") {
-    const weeksSinceInitialCommit = [
+function createGetAllQuery() {
+  // ziglang/zig commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
+  // -1 day, just wanna make sure ziglang/zig is included
+  const ZIG_INIT = new Date("2015-07-04");
+
+  const weeksSinceInit = [
       113,
       188,
       236,
@@ -1120,36 +1108,53 @@ const zigReposURLMake = (type) => {
       461,
       467,
     ];
+
+  let index = 0;
+  let monthsAfterLast = 0;
     const last = addWeeks(
-      ZIG_INITIAL_COMMIT,
-      weeksSinceInitialCommit[weeksSinceInitialCommit.length - 1],
+    ZIG_INIT,
+    weeksSinceInit[weeksSinceInit.length - 1],
     );
 
-    if (currentWeekIncrementIndex < weeksSinceInitialCommit.length) {
-      const start = currentWeekIncrementIndex === 0
-        ? ZIG_INITIAL_COMMIT
-        : addWeeks(
-          ZIG_INITIAL_COMMIT,
-          weeksSinceInitialCommit[currentWeekIncrementIndex - 1],
-        );
-      const end = addWeeks(
-        ZIG_INITIAL_COMMIT,
-        weeksSinceInitialCommit[currentWeekIncrementIndex],
-      );
+  return function getAllQuery() {
+    let query;
+
+    // the hardcoded weeksSinceInit is guaranteed to return 1k items
+    if (index < weeksSinceInit.length) {
+      let start = ZIG_INIT;
+      if (index > 0) start = addWeeks(ZIG_INIT, weeksSinceInit[index - 1]);
+      const end = addWeeks(ZIG_INIT, weeksSinceInit[index]);
       const dateRange = makeDateRange(start, end);
-      currentWeekIncrementIndex++;
+      index++;
       query = `in:name,description,topics zig created:${dateRange}`;
     } else {
       const start = addMonths(last, monthsAfterLast);
       const end = addMonths(last, monthsAfterLast + 1);
       monthsAfterLast += 1;
       if (end > new Date()) {
-        currentWeekIncrementIndex = 0;
+        index = 0;
         monthsAfterLast = 0;
       }
       const dateRange = makeDateRange(start, end);
       query = `in:name,description,topics zig created:${dateRange}`;
     }
+    return query;
+  };
+}
+// defined here because it's stateful, footgun?
+const getAllQuery = createGetAllQuery();
+
+/**
+ * @param {'top' | 'all'} type
+ * @returns {string}
+ */
+const zigReposURLMake = (type) => {
+  const base = "https://api.github.com/search/repositories";
+  let query;
+  if (type === "top") {
+    query = "language:zig";
+  } else if (type === "all") {
+    query = getAllQuery();
   } else {
     logger.error(`zigReposURLMake - invalid type: ${type}`);
     fatal(`zigReposURLMake - invalid type ${typeof type}`);
