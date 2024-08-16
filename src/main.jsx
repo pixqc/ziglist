@@ -221,6 +221,23 @@ const LucideGithub = () => (
     <path d="M9 18c-4.51 2-5-2-7-2" />
   </svg>
 );
+const LucideSearch = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    class="lucide lucide-search"
+  >
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+);
 
 const Badge = ({ value }) => (
   <span className="p-0.5 bg-[#eeedec] text-stone-500 dark:bg-[#363230] dark:text-stone-400 rounded-sm text-xs inline-block">
@@ -370,6 +387,25 @@ const Header = () => (
   </header>
 );
 
+const SearchBar = () => (
+  <form action="/search" method="get">
+    <div className="relative">
+      <input
+        className="w-full bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-md py-1 px-3 shadow-sm focus:outline-none focus:border-stone-400 dark:focus:border-stone-500 focus:ring-stone-400 dark:focus:ring-stone-500 focus:ring-1 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500 text-sm"
+        placeholder="search..."
+        type="text"
+        name="q"
+      />
+      <button
+        type="submit"
+        className="absolute inset-y-0 right-0 flex items-center px-4 text-stone-700 dark:text-stone-300 bg-stone-100 dark:bg-stone-700 border-l border-stone-200 dark:border-stone-600 rounded-r-md hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+      >
+        <LucideSearch />
+      </button>
+    </div>
+  </form>
+);
+
 const Navigation = ({ currentPath }) => {
   const textActive = "text-stone-900 dark:text-stone-100";
   const textDisabled = "text-stone-400 dark:text-stone-500";
@@ -377,45 +413,54 @@ const Navigation = ({ currentPath }) => {
     "hover:text-stone-900 dark:hover:text-stone-100 transition-colors";
 
   return (
-    <div className="max-w-5xl mx-auto px-3 flex space-x-4">
-      <a
-        href="/"
-        className={`${linkStyle} ${
-          currentPath === "/" ? textActive : textDisabled
-        }`}
-      >
-        Active
-      </a>
-      <a
-        href="/new"
-        className={`${linkStyle} ${
-          currentPath === "/new" ? textActive : textDisabled
-        }`}
-      >
-        New
-      </a>
-      <a
-        href="/top"
-        className={`${linkStyle} ${
-          currentPath === "/top" ? textActive : textDisabled
-        }`}
-      >
-        Top
-      </a>
-      <a
-        href="/dependencies"
-        className={`${linkStyle} ${
-          currentPath === "/dependencies" ? textActive : textDisabled
-        }`}
-      >
-        Deps
-      </a>
+    <>
+      <div className="max-w-5xl mx-auto px-3 flex space-x-4 items-center">
+        <a
+          href="/"
+          className={`${linkStyle} ${
+            currentPath === "/" ? textActive : textDisabled
+          }`}
+        >
+          Active
+        </a>
+        <a
+          href="/new"
+          className={`${linkStyle} ${
+            currentPath === "/new" ? textActive : textDisabled
+          }`}
+        >
+          New
+        </a>
+        <a
+          href="/top"
+          className={`${linkStyle} ${
+            currentPath === "/top" ? textActive : textDisabled
+          }`}
+        >
+          Top
+        </a>
+        <a
+          href="/dependencies"
+          className={`${linkStyle} ${
+            currentPath === "/dependencies" ? textActive : textDisabled
+          }`}
+        >
+          Deps
+        </a>
 
-      <div className="grow flex flex-col">
-        <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
-        <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
+        <div className="grow flex flex-col">
+          <div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
+          <div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
+        </div>
+
+        <div className="hidden sm:block w-full max-w-xs">
+          <SearchBar />
+        </div>
       </div>
-    </div>
+      <div className="sm:hidden w-full px-3 mt-1">
+        <SearchBar />
+      </div>
+    </>
   );
 };
 
@@ -684,6 +729,8 @@ app.get("/search", (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const offset = (page - 1) * perPage;
   const searchQuery = c.req.query("q") || "";
+  const specialChars = /[!-,.-\[\]^_\{\}]/g;
+  const escapedQuery = searchQuery.replace(specialChars, (char) => `"${char}"`);
 
   const matchStmt = db.prepare(`
     SELECT full_name
@@ -691,7 +738,7 @@ app.get("/search", (c) => {
     WHERE zig_repos_fts MATCH ?
     LIMIT ? OFFSET ?
   `);
-  const matchedFullNames = matchStmt.all(searchQuery, perPage, offset);
+  const matchedFullNames = matchStmt.all(escapedQuery, perPage, offset);
   matchStmt.finalize();
 
   if (matchedFullNames.length === 0) {
@@ -729,6 +776,7 @@ app.get("/search", (c) => {
     else repo.dependencies = repo.dependencies.split(",");
   });
 
+  // this is wrong btw, it's not escaping the query
   logger.info(
     `GET /search?q=${searchQuery}&page=${page} - ${repos.length} results from db`,
   );
@@ -1409,6 +1457,7 @@ const excludedRepos = [
 // HELP: please add c/cpp repos that builds with zig here!
 const includedRepos = [
   "ggerganov/ggml",
+  "trnxdev/onilang",
 ];
 
 const logger = createLogger();
