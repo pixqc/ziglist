@@ -831,17 +831,7 @@ app.get("/search", (c) => {
   const rawQuery = c.req.query("q") || "";
   const query = rawQuery.replace(/[-_]/g, " ");
 
-  if (query.trim() === "") {
-    return c.html(
-      <BaseLayout>
-        <Header />
-        <Hero />
-        <Navigation currentPath={"/search"} query={rawQuery} />
-        <NoItems />
-        <Footer />
-      </BaseLayout>,
-    );
-  }
+  if (query.trim() === "") return c.redirect("/");
 
   const stmt = db.prepare(`
     SELECT 
