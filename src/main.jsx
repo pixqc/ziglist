@@ -1595,7 +1595,7 @@ if (IS_PROD) {
   }
 }
 
-const db = new Database("testing.sqlite");
+const db = new Database("db.sqlite");
 db.exec(`
   PRAGMA journal_mode = WAL;
   CREATE TABLE IF NOT EXISTS zig_repos (
