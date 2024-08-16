@@ -1,8 +1,9 @@
 import "@std/dotenv/load";
 import { Database } from "sqlite";
-import { Hono } from "hono";
 import { z } from "zod";
 import { S3Client } from "s3";
+import { Hono } from "hono";
+import { serveStatic } from "hono/deno";
 
 // TODO:
 // - fuzzy/full text search, /all
@@ -534,7 +535,7 @@ const BaseLayout = ({ children }) => (
         <meta charSet="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>ziglist.org</title>
-        <style dangerouslySetInnerHTML={{ __html: tailwindcss }} />
+        <link rel="stylesheet" href="/assets/tailwind.css" />
       </head>
       <body className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
         {children}
@@ -604,6 +605,7 @@ const DependencyList = ({ deps }) => {
 // routes
 
 const app = new Hono();
+app.use("/assets/*", serveStatic({ root: "./" }));
 
 app.use("*", async (c, next) => {
   const start = Date.now();
@@ -877,13 +879,27 @@ app.get("/dependencies", (c) => {
 });
 
 const Page404 = () => (
-  <p>
-    404 page not found. Return to <a href="/">homepage</a>.
-  </p>
+  <div className="p-3 max-w-5xl mx-auto items-center w-full flex flex-col items-center">
+    <a
+      href="/"
+      className="text-stone-900 dark:text-stone-100 hover:underline mb-4"
+    >
+      ziglist.org
+    </a>
+    <img
+      src="./assets/ziglings.jpg"
+      alt="404 Error"
+    />
+  </div>
 );
 
 app.notFound((c) => {
-  return c.html(<Page404 />, 404);
+  return c.html(
+    <BaseLayout>
+      <Page404 />
+    </BaseLayout>,
+    404,
+  );
 });
 
 // ----------------------------------------------------------------------------
@@ -1719,7 +1735,6 @@ try {
   fatal(`healthcheck - database is not working: ${e}`);
 }
 
-let tailwindcss = "";
 try {
   tailwindcss = Deno.readTextFileSync("./assets/tailwind.css");
   logger.info("healthcheck - tailwind.css is loaded");
