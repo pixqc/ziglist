@@ -1067,41 +1067,41 @@ const SchemaRepoCodeberg = z.object({
 const zigReposInsert = (parsed) => {
   const stmt = db.prepare(`
     INSERT INTO zig_repos (
-        full_name, name, owner, description, homepage, license, 
-        created_at, updated_at, pushed_at, stars, forks, 
-        is_fork, default_branch, language,
-        min_zig_version, build_zig_exists, build_zig_fetched_at,
-        build_zig_zon_exists, build_zig_zon_fetched_at
+      full_name, name, owner, description, homepage, license, 
+      created_at, updated_at, pushed_at, stars, forks, 
+      is_fork, default_branch, language,
+      min_zig_version, build_zig_exists, build_zig_fetched_at,
+      build_zig_zon_exists, build_zig_zon_fetched_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
     ON CONFLICT(full_name) DO UPDATE SET
-        name = excluded.name,
-        owner = excluded.owner,
-        description = excluded.description,
-        homepage = excluded.homepage,
-        license = excluded.license,
-        created_at = excluded.created_at,
-        updated_at = excluded.updated_at,
-        pushed_at = excluded.pushed_at,
-        stars = excluded.stars,
-        forks = excluded.forks,
-        is_fork = excluded.is_fork,
-        default_branch = excluded.default_branch,
-        language = excluded.language;
+      name = excluded.name,
+      owner = excluded.owner,
+      description = excluded.description,
+      homepage = excluded.homepage,
+      license = excluded.license,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      pushed_at = excluded.pushed_at,
+      stars = excluded.stars,
+      forks = excluded.forks,
+      is_fork = excluded.is_fork,
+      default_branch = excluded.default_branch,
+      language = excluded.language;
   `);
-  const ftsDeleteStmt = db.prepare(`
-    DELETE FROM zig_repos_fts WHERE full_name = ?;
-  `);
-  const ftsInsertStmt = db.prepare(`
-    INSERT INTO zig_repos_fts(full_name, name, owner, description)
-    VALUES (?, ?, ?, ?);
-  `);
+  // const ftsDeleteStmt = db.prepare(`
+  //   DELETE FROM zig_repos_fts WHERE full_name = ?;
+  // `);
+  // const ftsInsertStmt = db.prepare(`
+  //   INSERT INTO zig_repos_fts(full_name, name, owner, description)
+  //   VALUES (?, ?, ?, ?);
+  // `);
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
-        ftsDeleteStmt.run(row[0]);
-        ftsInsertStmt.run(row[0], row[1], row[2], row[3]);
+        // ftsDeleteStmt.run(row[0]);
+        // ftsInsertStmt.run(row[0], row[1], row[2], row[3]);
       }
     });
     const rows = parsed.map((item) => [
@@ -1739,7 +1739,7 @@ const R2 = new S3Client({
 
 // R2 healthcheck
 if (IS_PROD) {
-  const sqliteBackup = "backup-2024-08-16T00_00_00.002Z.sqlite";
+  const sqliteBackup = "backup-2024-08-19T00_00_00.002Z.sqlite";
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
     const localOutFile = await Deno.open("db.sqlite", {
@@ -1970,6 +1970,7 @@ Deno.serve({ port }, app.fetch);
 
 updateIncludedRepos();
 zigBuildFetchInsert();
+zigReposFetchInsert("top");
 zigReposFetchInsert("codeberg:all");
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
 Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
