@@ -1121,26 +1121,19 @@ const zigReposInsert = (parsed) => {
 };
 
 const rebuildFts = () => {
-  const stmt = db.prepare(`
-    DROP TABLE IF EXISTS zig_repos_fts;
+  db.exec(`DROP TABLE IF EXISTS zig_repos_fts;`);
+  db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
       owner, 
       name,
       full_name,
       description
-    );
-    INSERT INTO zig_repos_fts(full_name, name, owner, description)
-      SELECT full_name, name, owner, description
+    );`);
+  db.exec(`
+    INSERT INTO zig_repos_fts(owner, name, full_name, description)
+      SELECT owner, name, full_name, description
       FROM zig_repos;
   `);
-  try {
-    stmt.run();
-    logger.info("zig_repos_fts rebuilt");
-  } catch (e) {
-    logger.error(`zig_repos_fts rebuild - ${e}`);
-  } finally {
-    stmt.finalize();
-  }
 };
 
 /**
@@ -1971,11 +1964,11 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
+rebuildFts();
 updateIncludedRepos();
 zigBuildFetchInsert();
 zigReposFetchInsert("top");
 zigReposFetchInsert("codeberg:all");
-rebuildFts();
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
 Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
 Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
@@ -1984,5 +1977,4 @@ Deno.cron(
   "0 */3 * * *",
   () => zigReposFetchInsert("codeberg:all"),
 );
-Deno.cron("rebuildFts", "0 * * * *", rebuildFts);
 Deno.cron("backup", "0 0,12 * * *", backup);
