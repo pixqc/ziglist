@@ -1089,19 +1089,10 @@ const zigReposInsert = (parsed) => {
       default_branch = excluded.default_branch,
       language = excluded.language;
   `);
-  // const ftsDeleteStmt = db.prepare(`
-  //   DELETE FROM zig_repos_fts WHERE full_name = ?;
-  // `);
-  // const ftsInsertStmt = db.prepare(`
-  //   INSERT INTO zig_repos_fts(full_name, name, owner, description)
-  //   VALUES (?, ?, ?, ?);
-  // `);
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
-        // ftsDeleteStmt.run(row[0]);
-        // ftsInsertStmt.run(row[0], row[1], row[2], row[3]);
       }
     });
     const rows = parsed.map((item) => [
@@ -1126,6 +1117,29 @@ const zigReposInsert = (parsed) => {
     logger.error(`zig_repos bulk insert - ${e}`);
   } finally {
     if (stmt) stmt.finalize();
+  }
+};
+
+const rebuildFts = () => {
+  const stmt = db.prepare(`
+    DROP TABLE IF EXISTS zig_repos_fts;
+    CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
+      owner, 
+      name,
+      full_name,
+      description
+    );
+    INSERT INTO zig_repos_fts(full_name, name, owner, description)
+      SELECT full_name, name, owner, description
+      FROM zig_repos;
+  `);
+  try {
+    stmt.run();
+    logger.info("zig_repos_fts rebuilt");
+  } catch (e) {
+    logger.error(`zig_repos_fts rebuild - ${e}`);
+  } finally {
+    stmt.finalize();
   }
 };
 
@@ -1798,18 +1812,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
   CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
   CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
-
-  -- Full text search
-  DROP TABLE IF EXISTS zig_repos_fts;
-  CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
-    owner, 
-    name,
-    full_name,
-    description
-  );
-  INSERT INTO zig_repos_fts(full_name, name, owner, description)
-    SELECT full_name, name, owner, description
-    FROM zig_repos;
 `);
 
 // older Zig projects don't use zon files to list their dependencies
@@ -1972,6 +1974,7 @@ updateIncludedRepos();
 zigBuildFetchInsert();
 zigReposFetchInsert("top");
 zigReposFetchInsert("codeberg:all");
+rebuildFts();
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
 Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
 Deno.cron("zigReposFetchInsert", "* * * * *", () => zigReposFetchInsert("all"));
@@ -1980,4 +1983,5 @@ Deno.cron(
   "0 */3 * * *",
   () => zigReposFetchInsert("codeberg:all"),
 );
+Deno.cron("rebuildFts", "0 * * * *", rebuildFts);
 Deno.cron("backup", "0 0,12 * * *", backup);
