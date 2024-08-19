@@ -1694,6 +1694,7 @@ const excludedRepos = [
   "ee7/binary-size",
   "codingonion/hello-algo-rust",
   "ratfactor/ziglings", // only show the codeberg one
+  "ziglings-org/exercises", // only show the codeberg one
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
