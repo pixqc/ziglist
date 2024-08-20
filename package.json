@@ -1,0 +1,23 @@
+{
+  "name": "ziglist",
+  "module": "src/main.jsx",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "scripts": {
+    "start": "IS_PROD=1 bun run src/main.jsx",
+    "dev:main": "bun run --watch src/main.jsx",
+    "dev:tailwind": "bunx tailwindcss -i ./assets/style.css -o ./assets/tailwind.css --minify",
+    "dev:restore": "bun run src/restore.js",
+    "dev:clean": "rm db.sqlite db.sqlite-shm db.sqlite-wal",
+    "dev:init": "bun run dev:tailwind && bun run dev:restore",
+    "dev": "bun run dev:tailwind --watch & bun run dev:main"
+  }
+}
