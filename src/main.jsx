@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Database } from "bun:sqlite";
 import { appendFileSync } from "node:fs";
 
 /**
@@ -14,7 +15,7 @@ import { appendFileSync } from "node:fs";
  *   flush: () => Promise<void>
  * }} A logger object with methods for each log level and a flush method.
  */
-const createLogger = () => {
+export const createLogger = () => {
 	/** @type {string[]} */
 	let buffer = [];
 
@@ -26,15 +27,15 @@ const createLogger = () => {
 	 * @returns {void}
 	 */
 	const log = (level, message, data) => {
-		const now = new Date().toISOString();
-		const msg = `${now} ${level.toUpperCase()}: ${message}`;
-		if (data !== undefined) {
-			buffer.push(`${msg} ${JSON.stringify(data)}`);
-			console.log(msg, data);
-		} else {
-			buffer.push(msg);
-			console.log(msg);
-		}
+		const logEntry = {
+			timestamp: new Date().toISOString(),
+			level: level,
+			caller: getCallerName(),
+			message,
+			data,
+		};
+
+		buffer.push(JSON.stringify(logEntry));
 	};
 
 	return {
@@ -53,7 +54,19 @@ const createLogger = () => {
 		},
 	};
 };
-const logger = createLogger();
+
+function getCallerName() {
+	try {
+		throw new Error();
+	} catch (e) {
+		// @ts-ignore - useless unknown
+		const stackLines = e.stack.split("\n");
+		const callerLineParts = stackLines[3].trim().split(" ");
+		return callerLineParts[1] || "unknown";
+	}
+}
+
+export const logger = createLogger();
 
 /**
  * A wise man once said:
@@ -188,6 +201,9 @@ export const getURL = (type) => {
 	return ""; // unreachable
 };
 
+/**
+ * @param {Database} conn
+ */
 export const initDB = (conn) => {
 	conn.exec(`PRAGMA journal_mode = WAL;`);
 	conn.exec(`
@@ -210,6 +226,10 @@ export const initDB = (conn) => {
 `);
 };
 
+/**
+ * @param {Database} conn
+ * @param {any[]} parsed
+ */
 export const zigReposInsert = (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO zig_repos (

@@ -6,6 +6,7 @@ import {
 	getURL,
 	initDB,
 	zigReposInsert,
+	logger,
 } from "./main.jsx";
 
 describe("Repository fetching and insertion", () => {
@@ -42,5 +43,6 @@ describe("Repository fetching and insertion", () => {
 
 	afterAll(() => {
 		db.close();
+		logger.flush();
 	});
 });
