@@ -225,16 +225,15 @@ export const getZigZonURL = getMetadataURL("build.zig.zon");
  * @param {string} url
  * @returns {Promise<{
  *  status: number,
- *  fetchedAt: number,
+ *  fetched_at: number,
  *  content: string,
  *  }>}
  */
 export const fetchMetadata = async (url) => {
 	const response = await fetch(url);
-	const fetchedAt = Math.floor(Date.now() / 1000);
 	return {
 		status: response.status,
-		fetchedAt,
+		fetched_at: Math.floor(Date.now() / 1000),
 		content: await response.text(),
 	};
 };
@@ -242,10 +241,10 @@ export const fetchMetadata = async (url) => {
 /**
  * @typedef {Object} RepoMetadata
  * @property {string} full_name
- * @property {string|undefined} min_zig_version
- * @property {boolean} buildZigExists
- * @property {boolean} zonExists
- * @property {number} fetchedAt
+ * @property {string|null} min_zig_version
+ * @property {boolean} build_zig_exists
+ * @property {boolean} build_zig_zon_exists
+ * @property {number} fetched_at
  */
 
 /**
@@ -274,16 +273,16 @@ export const updateMetadata = (conn, parsed) => {
 				stmt.run(
 					row.full_name,
 					row.min_zig_version ?? null,
-					row.buildZigExists,
-					row.zonExists,
-					row.fetchedAt,
+					row.build_zig_exists,
+					row.build_zig_zon_exists,
+					row.fetched_at,
 				);
 			}
 		});
 		bulkUpdate(parsed);
-		logger.info(`zig_repo_metadata bulk update - len ${parsed.length}`);
+		logger.info(`db - updateMetadata - len ${parsed.length}`);
 	} catch (e) {
-		logger.error(`zig_repo_metadata bulk update - ${e}`);
+		logger.error(`db - updateMetadata - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}
@@ -324,6 +323,25 @@ export const initDB = (conn) => {
 		fetched_at INTEGER NULL,
 		FOREIGN KEY (full_name) REFERENCES zig_repos(full_name)
 	);`);
+	conn.exec(`
+	CREATE TABLE IF NOT EXISTS url_dependencies (
+		hash TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		url TEXT NOT NULL
+	);`);
+	conn.exec(`
+	CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		full_name TEXT NOT NULL,
+		name TEXT NOT NULL,
+		dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
+		path TEXT,
+		url_dependency_hash TEXT,
+		FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
+		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
+		UNIQUE(full_name, name, dependency_type, path)
+		UNIQUE(full_name, name, dependency_type, url_dependency_hash)
+	);`);
 };
 
 /**
@@ -362,10 +380,92 @@ export const insertZigRepos = (conn, parsed) => {
 			item.language,
 		]);
 		upsertMany(rows);
-		logger.info(`db - zigReposInert - len ${rows.length}`);
+		logger.info(`db - zigReposInsert - len ${rows.length}`);
 	} catch (e) {
-		logger.error(`db - zigReposInert - ${e}`);
+		logger.error(`db - zigReposInsert - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
+	}
+};
+
+export const processDependencies = (parsed, full_name) => {
+	const urlDeps = [];
+	const deps = [];
+
+	Object.entries(parsed.dependencies).forEach(([name, dep]) => {
+		if ("url" in dep && "hash" in dep) {
+			deps.push({
+				full_name,
+				name: name,
+				dependency_type: "url",
+				path: null,
+				url_dependency_hash: dep.hash,
+			});
+			urlDeps.push({
+				name: name,
+				url: dep.url,
+				hash: dep.hash,
+			});
+		} else if ("path" in dep) {
+			deps.push({
+				full_name,
+				name: name,
+				dependency_type: "path",
+				path: dep.path,
+				url_dependency_hash: null,
+			});
+		}
+	});
+
+	return { urlDeps, deps };
+};
+
+export const insertUrlDependencies = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+		VALUES (?, ?, ?)
+	`);
+
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(row);
+			}
+		});
+		const rows = parsed.map((item) => [item.hash, item.name, item.url]);
+		upsertMany(rows);
+		logger.info(`url_dependencies bulk insert - len ${rows.length}`);
+	} catch (e) {
+		logger.error(`url_dependencies bulk insert - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
+
+export const insertDependencies = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT OR REPLACE INTO zig_repo_dependencies (
+			full_name, name, dependency_type, path, url_dependency_hash
+		) VALUES (?, ?, ?, ?, ?)`);
+
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(row);
+			}
+		});
+
+		const rows = parsed.map((item) => [
+			item.full_name,
+			item.name,
+			item.dependency_type,
+			item.path,
+			item.url_dependency_hash,
+		]);
+
+		upsertMany(rows);
+		logger.info(`zig_repo_dependencies bulk insert - len ${rows.length}`);
+	} catch (e) {
+		logger.error(`zig_repo_dependencies bulk insert - ${e}`);
 	}
 };
