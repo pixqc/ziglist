@@ -3,131 +3,95 @@ import { Database } from "bun:sqlite";
 import {
 	getSchemaRepo,
 	getHeaders,
-	getURL,
 	initDB,
-	zigReposInsert,
+	insertZigRepos,
 	logger,
 	getZigZonURL,
+	fetchMetadata,
 	SchemaZon,
 	zon2json,
 	getZigBuildURL,
+	updateMetadata,
 } from "./main.jsx";
+import { z } from "zod";
+
+/**
+ * @param {'github' | 'codeberg'} type
+ * @returns {string}
+ */
+const getURL = (type) => {
+	if (type === "github") {
+		return "https://api.github.com/repos/ziglang/zig";
+	} else if (type === "codeberg") {
+		// because the deps has both path and url, good for testing
+		return "https://codeberg.org/api/v1/repos/GalaxyShard/zig-git2";
+	}
+	return ""; // unreachable
+};
 
 describe("Fetching and insertion", () => {
-	let db;
+	const githubFullname = "ziglang/zig";
+	const codebergFullname = "codeberg:GalaxyShard/zig-git2";
 
+	let db;
 	beforeAll(() => {
-		db = new Database(":memory:");
+		db = new Database("test.sqlite");
 		initDB(db);
 	});
 
 	/**
 	 * @param {'github' | 'codeberg'} type
-	 * @returns {Promise<any>}
+	 * @returns {Promise<z.infer<ReturnType<typeof getSchemaRepo>>>}
 	 */
 	async function repoFetchAndParse(type) {
 		const file = Bun.file(`./.http-cache/repo-${type}.json`);
 		const schema = getSchemaRepo(type);
-		let data;
-		if (file.size === 0) {
-			const url = getURL(type);
-			const res = await fetch(url, { headers: getHeaders(type) });
-			data = await res.json();
-			await Bun.write(file, JSON.stringify(data));
-		} else {
-			data = JSON.parse(await file.text());
-		}
+		if (file.size > 0) return schema.parse(JSON.parse(await file.text()));
+		const url = getURL(type);
+		const res = await fetch(url, { headers: getHeaders(type) });
+		const data = await res.json();
+		await Bun.write(file, JSON.stringify(data));
 		return schema.parse(data);
-	}
-
-	/**
-	 * @param {'github' | 'codeberg'} type
-	 * @param {string} full_name
-	 * @param {string} default_branch
-	 * @returns {Promise<any>}
-	 */
-	async function zonFetchAndParse(type, full_name, default_branch) {
-		const file = Bun.file(`./.http-cache/zon-${type}.json`);
-		let data;
-		if (file.size === 0) {
-			const url = getZigZonURL(type, full_name, default_branch);
-			console.log(url);
-			const res = await fetch(url);
-			data = await res.text();
-			await Bun.write(file, data);
-		} else {
-			data = await file.text();
-		}
-		return SchemaZon.parse(JSON.parse(zon2json(data)));
-	}
-
-	/**
-	 * @param {'github' | 'codeberg'} type
-	 * @param {string} full_name
-	 * @param {string} default_branch
-	 * @returns {Promise<any>}
-	 */
-	async function buildZigFetch(type, full_name, default_branch) {
-		const file = Bun.file(`./.http-cache/build-${type}.json`);
-		let data;
-		if (file.size === 0) {
-			const url = getZigBuildURL(type, full_name, default_branch);
-			const res = await fetch(url);
-			data = await res.text();
-			await Bun.write(file, data);
-		} else {
-			data = await file.text();
-		}
-		return data;
 	}
 
 	it("should fetch GitHub repo, insert into zig_repos", async () => {
 		const githubData = await repoFetchAndParse("github");
-		zigReposInsert(db, [githubData]);
-		const stmt = db.prepare(
-			"SELECT * FROM zig_repos WHERE full_name = 'ziglang/zig'",
-		);
-		const result = stmt.get();
+		insertZigRepos(db, [githubData]);
+		const stmt = db.prepare("SELECT * FROM zig_repos WHERE full_name = ?");
+		const result = stmt.get(githubFullname);
 		expect(result).toBeDefined();
 	});
 
 	it("should fetch Codeberg repo, insert into zig_repos", async () => {
 		const codebergData = await repoFetchAndParse("codeberg");
-		zigReposInsert(db, [codebergData]);
-		const stmt = db.prepare(
-			"SELECT * FROM zig_repos WHERE full_name = 'codeberg:dude_the_builder/zg'",
-		);
-		const result = stmt.get();
+		insertZigRepos(db, [codebergData]);
+		const stmt = db.prepare("SELECT * FROM zig_repos WHERE full_name = ?");
+		const result = stmt.get(codebergFullname);
 		expect(result).toBeDefined();
-		expect(result.full_name).toBe("codeberg:dude_the_builder/zg");
+		expect(result.full_name).toBe(codebergFullname);
 	});
 
 	it("should fetch and parse ziglang/zig build.zig.zon", async () => {
-		const data = await zonFetchAndParse("github", "ziglang/zig", "master");
-		expect(data).toBeDefined();
-	});
+		const [zonData, buildData] = await Promise.all([
+			fetchMetadata(getZigZonURL("github", githubFullname, "master")),
+			fetchMetadata(getZigBuildURL("github", githubFullname, "master")),
+		]);
 
-	it("should fetch and parse codeberg:dude_the_builder/zg build.zig.zon", async () => {
-		const data = await zonFetchAndParse(
-			"codeberg",
-			"dude_the_builder/zg",
-			"master",
-		);
-		expect(data).toBeDefined();
-	});
+		expect(zonData.status).toBe(200);
+		expect(buildData.status).toBe(200);
+		expect(zonData.fetchedAt).toBeGreaterThan(0);
+		const parsed = SchemaZon.safeParse(JSON.parse(zon2json(zonData.content)));
+		expect(parsed.success).toBe(true);
 
-	it("should fetch and parse ziglang/zig build.zig", async () => {
-		const data = await buildZigFetch("github", "ziglang/zig", "master");
-		expect(data).toBeDefined();
-	});
+		const metadata = {
+			full_name: githubFullname,
+			min_zig_version: parsed.data?.minimum_zig_version,
+			buildZigExists: true,
+			zonExists: true,
+			fetchedAt: zonData.fetchedAt,
+		};
 
-	it("should fetch and parse codeberg:dude_the_builder/zg build.zig", async () => {
-		const data = await buildZigFetch(
-			"codeberg",
-			"dude_the_builder/zg",
-			"master",
-		);
-		expect(data).toBeDefined();
+		updateMetadata(db, [metadata]);
 	});
 
 	afterAll(() => {

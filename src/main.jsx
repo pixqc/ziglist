@@ -129,6 +129,10 @@ const SchemaRepoBase = z.object({
 	pushed_at: z.string().nullish(),
 });
 
+/**
+ * @param {z.infer<typeof SchemaRepoBase>} data
+ * @param {'github' | 'codeberg'} type
+ */
 const transformRepo = (data, type) => ({
 	name: data.name,
 	full_name:
@@ -201,57 +205,98 @@ export const getHeaders = (type) => {
 };
 
 /**
- * @param {'github' | 'codeberg'} type
- * @returns {string}
+ * @param {string} filename
+ * @returns {(type: 'github' | 'codeberg', full_name: string, default_branch: string) => string}
  */
-export const getURL = (type) => {
+const getMetadataURL = (filename) => (type, full_name, default_branch) => {
 	if (type === "github") {
-		return "https://api.github.com/repos/ziglang/zig";
+		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/${filename}`;
 	} else if (type === "codeberg") {
-		return "https://codeberg.org/api/v1/repos/dude_the_builder/zg";
-	}
-	fatal(`getURL - invalid type ${type}`);
-	return ""; // unreachable
-};
-
-/**
- * @param {'github' | 'codeberg'} type
- * @param {string} full_name
- * @param {string} default_branch
- * @returns {string}
- */
-export const getZigBuildURL = (type, full_name, default_branch) => {
-	if (type === "github") {
-		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/build.zig`;
-	} else if (type === "codeberg") {
-		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/build.zig`;
+		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/${filename}`;
 	}
 	fatal(`getZigBuildURL - invalid type ${type}`);
 	return ""; // unreachable
 };
 
+export const getZigBuildURL = getMetadataURL("build.zig");
+export const getZigZonURL = getMetadataURL("build.zig.zon");
+
 /**
- * @param {'github' | 'codeberg'} type
- * @param {string} full_name
- * @param {string} default_branch
- * @returns {string}
+ * @param {string} url
+ * @returns {Promise<{
+ *  status: number,
+ *  fetchedAt: number,
+ *  content: string,
+ *  }>}
  */
-export const getZigZonURL = (type, full_name, default_branch) => {
-	if (type === "github") {
-		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/build.zig.zon`;
-	} else if (type === "codeberg") {
-		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/build.zig.zon`;
+export const fetchMetadata = async (url) => {
+	const response = await fetch(url);
+	const fetchedAt = Math.floor(Date.now() / 1000);
+	return {
+		status: response.status,
+		fetchedAt,
+		content: await response.text(),
+	};
+};
+
+/**
+ * @typedef {Object} RepoMetadata
+ * @property {string} full_name
+ * @property {string|undefined} min_zig_version
+ * @property {boolean} buildZigExists
+ * @property {boolean} zonExists
+ * @property {number} fetchedAt
+ */
+
+/**
+ * @param {Database} conn
+ * @param {RepoMetadata[]} parsed
+ */
+export const updateMetadata = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT INTO zig_repo_metadata (
+			full_name,
+			min_zig_version,
+			build_zig_exists,
+			build_zig_zon_exists,
+			fetched_at
+		) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(full_name) DO UPDATE SET
+			min_zig_version = excluded.min_zig_version,
+			build_zig_exists = excluded.build_zig_exists,
+			build_zig_zon_exists = excluded.build_zig_zon_exists,
+			fetched_at = excluded.fetched_at
+		`);
+
+	try {
+		const bulkUpdate = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(
+					row.full_name,
+					row.min_zig_version ?? null,
+					row.buildZigExists,
+					row.zonExists,
+					row.fetchedAt,
+				);
+			}
+		});
+		bulkUpdate(parsed);
+		logger.info(`zig_repo_metadata bulk update - len ${parsed.length}`);
+	} catch (e) {
+		logger.error(`zig_repo_metadata bulk update - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
 	}
-	fatal(`getZigBuildURL - invalid type ${type}`);
-	return ""; // unreachable
 };
 
 /**
  * @param {Database} conn
+ * @returns {void}
  */
 export const initDB = (conn) => {
 	conn.exec(`PRAGMA journal_mode = WAL;`);
-	// using ${repo}:full_name as pk, instead having "github/gitlab/codeberg" field
+	// using ${platform}:full_name as pk
+	// instead having "github/gitlab/codeberg" field
 	// because two repo, where one is mirrored, breaks constraint
 	conn.exec(`
 	CREATE TABLE IF NOT EXISTS zig_repos (
@@ -270,13 +315,22 @@ export const initDB = (conn) => {
 		default_branch TEXT,
 		language TEXT
 	);`);
+	conn.exec(`
+	CREATE TABLE IF NOT EXISTS zig_repo_metadata (
+		full_name TEXT PRIMARY KEY,
+		min_zig_version TEXT,
+		build_zig_exists BOOLEAN NULL,
+		build_zig_zon_exists BOOLEAN NULL,
+		fetched_at INTEGER NULL,
+		FOREIGN KEY (full_name) REFERENCES zig_repos(full_name)
+	);`);
 };
 
 /**
  * @param {Database} conn
- * @param {any[]} parsed
+ * @param {z.infer<ReturnType<typeof getSchemaRepo>>[]} parsed
  */
-export const zigReposInsert = (conn, parsed) => {
+export const insertZigRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO zig_repos (
 			full_name, name, owner, description, homepage, license, 
