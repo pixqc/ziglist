@@ -11,41 +11,50 @@ import {
 
 describe("Repository fetching and insertion", () => {
 	let db;
+
 	beforeAll(() => {
 		db = new Database(":memory:");
 		initDB(db);
 	});
 
-	it("should fetch and insert zig_repos", async () => {
-		const db = new Database(":memory:");
-		initDB(db);
-		const fetchPromises = ["codeberg", "github"].map(async (type) => {
-			const file = Bun.file(`./.http-cache/test/${type}.json`);
-			const schema = getSchemaRepo(type);
-			if (file.size === 0) {
-				const url = getURL(type);
-				const res = await fetch(url, { headers: getHeaders(type) });
-				const data = await res.json();
-				Bun.write(file, JSON.stringify(data));
-				return schema.parse(data);
-			} else {
-				const data = await file.text();
-				return schema.parse(JSON.parse(data));
-			}
-		});
-		const parsed = await Promise.all(fetchPromises);
-		console.log(parsed);
-		zigReposInsert(db, parsed);
+	/**
+	 * @param {'github' | 'codeberg'} type
+	 * @returns {Promise<any>}
+	 */
+	async function fetchAndParse(type) {
+		const file = Bun.file(`./.http-cache/test/${type}.json`);
+		const schema = getSchemaRepo(type);
+		let data;
+		if (file.size === 0) {
+			const url = getURL(type);
+			const res = await fetch(url, { headers: getHeaders(type) });
+			data = await res.json();
+			await Bun.write(file, JSON.stringify(data));
+		} else {
+			data = JSON.parse(await file.text());
+		}
+		return schema.parse(data);
+	}
 
-		const stmt = db.prepare(`
-			SELECT * FROM zig_repos;
-		`);
-		const result = stmt.all();
-		console.log(result);
+	it("should fetch GitHub, insert into zig_repos", async () => {
+		const githubData = await fetchAndParse("github");
+		zigReposInsert(db, [githubData]);
+		const stmt = db.prepare(
+			"SELECT * FROM zig_repos WHERE full_name = 'ziglang/zig'",
+		);
+		const result = stmt.get();
 		expect(result).toBeDefined();
-		expect(result.length).toBe(2);
-		expect(result[0].full_name).toBe("codeberg:ziglings/exercises");
-		expect(result[1].full_name).toBe("ziglang/zig");
+	});
+
+	it("should fetch Codeberg, insert into zig_repos", async () => {
+		const codebergData = await fetchAndParse("codeberg");
+		zigReposInsert(db, [codebergData]);
+		const stmt = db.prepare(
+			"SELECT * FROM zig_repos WHERE full_name = 'codeberg:ziglings/exercises'",
+		);
+		const result = stmt.get();
+		expect(result).toBeDefined();
+		expect(result.full_name).toBe("codeberg:ziglings/exercises");
 	});
 
 	afterAll(() => {
