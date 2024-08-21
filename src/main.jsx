@@ -251,7 +251,7 @@ export const fetchMetadata = async (url) => {
  * @param {Database} conn
  * @param {RepoMetadata[]} parsed
  */
-export const updateMetadata = (conn, parsed) => {
+export const upsertMetadata = (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO zig_repo_metadata (
 			full_name,
@@ -280,9 +280,9 @@ export const updateMetadata = (conn, parsed) => {
 			}
 		});
 		bulkUpdate(parsed);
-		logger.info(`db - updateMetadata - len ${parsed.length}`);
+		logger.info(`db - upsertMetadata - len ${parsed.length}`);
 	} catch (e) {
-		logger.error(`db - updateMetadata - ${e}`);
+		logger.error(`db - upsertMetadata - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}
