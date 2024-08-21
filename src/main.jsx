@@ -90,6 +90,27 @@ const fatal = (message, data) => {
 const dateToUnix = (dateString) =>
 	Math.floor(new Date(dateString).getTime() / 1000);
 
+/**
+ * https://github.com/ziglang/zig/blob/a931bfada5e358ace980b2f8fbc50ce424ced526/doc/build.zig.zon.md
+ *
+ * @param {string} zon - raw zig struct (build.zig.zon)
+ * @returns {string} - string parseable by JSON.parse
+ */
+export const zon2json = (zon) => {
+	return zon
+		.replace(/(?<!:)\/\/.*$/gm, "") // Remove comments
+		.replace(/\.\{""}/g, ".{}") // Handle empty objects
+		.replace(/\.{/g, "{") // Replace leading dots before curly braces
+		.replace(/\.@"([^"]+)"?\s*=\s*/g, '"$1": ') // Handle .@"key" = value
+		.replace(/\.(\w+)\s*=\s*/g, '"$1": ') // Handle .key = value
+		.replace(/("paths"\s*:\s*){([^}]*)}/g, "$1[$2]") // Convert paths to array
+		.replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+		.replace(/"url"\s*:\s*"([^"]+)"/g, (_, p1) => {
+			// Special handling for URL to preserve '?' and '#'
+			return `"url": "${p1.replace(/"/g, '\\"')}"`;
+		});
+};
+
 const SchemaRepoBase = z.object({
 	name: z.string(),
 	full_name: z.string(),
@@ -124,6 +145,28 @@ const transformRepo = (data, type) => ({
 	license: data.license?.spdx_id ?? null,
 	homepage: data.homepage ?? null,
 	default_branch: data.default_branch,
+});
+
+export const SchemaZon = z.object({
+	name: z.string(),
+	version: z.string(),
+	minimum_zig_version: z.string().optional(),
+	paths: z.array(z.string()).optional(),
+	dependencies: z
+		.record(
+			z.union([
+				z.object({
+					url: z.string(),
+					hash: z.string(),
+					lazy: z.boolean().optional(),
+				}),
+				z.object({
+					path: z.string(),
+					lazy: z.boolean().optional(),
+				}),
+			]),
+		)
+		.optional(),
 });
 
 /**
@@ -165,9 +208,41 @@ export const getURL = (type) => {
 	if (type === "github") {
 		return "https://api.github.com/repos/ziglang/zig";
 	} else if (type === "codeberg") {
-		return "https://codeberg.org/api/v1/repos/ziglings/exercises";
+		return "https://codeberg.org/api/v1/repos/dude_the_builder/zg";
 	}
 	fatal(`getURL - invalid type ${type}`);
+	return ""; // unreachable
+};
+
+/**
+ * @param {'github' | 'codeberg'} type
+ * @param {string} full_name
+ * @param {string} default_branch
+ * @returns {string}
+ */
+export const getZigBuildURL = (type, full_name, default_branch) => {
+	if (type === "github") {
+		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/build.zig`;
+	} else if (type === "codeberg") {
+		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/build.zig`;
+	}
+	fatal(`getZigBuildURL - invalid type ${type}`);
+	return ""; // unreachable
+};
+
+/**
+ * @param {'github' | 'codeberg'} type
+ * @param {string} full_name
+ * @param {string} default_branch
+ * @returns {string}
+ */
+export const getZigZonURL = (type, full_name, default_branch) => {
+	if (type === "github") {
+		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/build.zig.zon`;
+	} else if (type === "codeberg") {
+		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/build.zig.zon`;
+	}
+	fatal(`getZigBuildURL - invalid type ${type}`);
 	return ""; // unreachable
 };
 
@@ -176,6 +251,8 @@ export const getURL = (type) => {
  */
 export const initDB = (conn) => {
 	conn.exec(`PRAGMA journal_mode = WAL;`);
+	// using ${repo}:full_name as pk, instead having "github/gitlab/codeberg" field
+	// because two repo, where one is mirrored, breaks constraint
 	conn.exec(`
 	CREATE TABLE IF NOT EXISTS zig_repos (
 		full_name TEXT PRIMARY KEY,
