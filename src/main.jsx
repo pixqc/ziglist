@@ -2,6 +2,10 @@ import { z } from "zod";
 import { Database } from "bun:sqlite";
 import { appendFileSync } from "node:fs";
 
+// TODO:
+// - are there more fields i need to add? just in case
+// - the github all url generator can be hardcoded, no need to addWeeks
+
 /**
  * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
  *
@@ -19,6 +23,15 @@ export const createLogger = () => {
 	/** @type {string[]} */
 	let buffer = [];
 
+	const LOG_MAP = {
+		trace: 10,
+		debug: 20,
+		info: 30,
+		warn: 40,
+		error: 50,
+		fatal: 60,
+	};
+
 	/**
 	 * Logs a message with a log level and optional data.
 	 * @param {LogLevel} level - Log level.
@@ -29,8 +42,7 @@ export const createLogger = () => {
 	const log = (level, message, data) => {
 		const logEntry = {
 			timestamp: new Date().toISOString(),
-			level: level,
-			caller: getCallerName(),
+			level: LOG_MAP[level],
 			message,
 			data,
 		};
@@ -55,17 +67,6 @@ export const createLogger = () => {
 	};
 };
 
-function getCallerName() {
-	try {
-		throw new Error();
-	} catch (e) {
-		// @ts-ignore - useless unknown
-		const stackLines = e.stack.split("\n");
-		const callerLineParts = stackLines[3].trim().split(" ");
-		return callerLineParts[1] || "unknown";
-	}
-}
-
 export const logger = createLogger();
 
 /**
@@ -78,89 +79,58 @@ export const logger = createLogger();
  */
 const fatal = (message, data) => {
 	logger.fatal(message, data);
+	logger.flush();
 	process.exit(1);
 };
 
 /**
+ * @param {string} dateString
+ * @returns {number}
+ */
+const dateToUnix = (dateString) =>
+	Math.floor(new Date(dateString).getTime() / 1000);
+
+const SchemaRepoBase = z.object({
+	name: z.string(),
+	full_name: z.string(),
+	owner: z.object({ login: z.string() }),
+	description: z.string().nullish(),
+	language: z.string().nullish(),
+	fork: z.boolean(),
+	forks_count: z.number(),
+	created_at: z.string(),
+	updated_at: z.string(),
+	license: z.object({ spdx_id: z.string() }).nullish(),
+	homepage: z.string().nullish(),
+	default_branch: z.string(),
+	stargazers_count: z.number().nullish(),
+	stars_count: z.number().nullish(),
+	pushed_at: z.string().nullish(),
+});
+
+const transformRepo = (data, type) => ({
+	name: data.name,
+	full_name:
+		type === "codeberg" ? `codeberg:${data.full_name}` : data.full_name,
+	owner: data.owner.login,
+	description: data.description ?? null,
+	language: data.language ?? null,
+	is_fork: data.fork,
+	forks: data.forks_count,
+	stars: data.stargazers_count ?? data.stars_count ?? 0,
+	created_at: dateToUnix(data.created_at),
+	updated_at: dateToUnix(data.updated_at),
+	pushed_at: dateToUnix(data.pushed_at ?? data.updated_at),
+	license: data.license?.spdx_id ?? null,
+	homepage: data.homepage ?? null,
+	default_branch: data.default_branch,
+});
+
+/**
  * @param {'github' | 'codeberg'} type
  */
-export const getSchemaRepo = (type) => {
-	/**
-	 * @param {string} dateString
-	 * @returns {number}
-	 */
-	const dateToUnix = (dateString) =>
-		Math.floor(new Date(dateString).getTime() / 1000);
-
-	const SchemaRepoBase = z.object({
-		name: z.string(),
-		full_name: z.string(),
-		owner: z.object({ login: z.string() }),
-		description: z.string().nullish(),
-		language: z.string().nullish(),
-		fork: z.boolean(),
-		forks_count: z.number(),
-		created_at: z.string().transform(dateToUnix),
-		updated_at: z.string().transform(dateToUnix),
-		license: z.object({ spdx_id: z.string() }).nullish(),
-		homepage: z.string().nullish(),
-		default_branch: z.string(),
-	});
-
-	if (type === "github") {
-		return SchemaRepoBase.extend({
-			pushed_at: z.string().transform(dateToUnix),
-			stargazers_count: z.number().transform((val) => val),
-		}).transform(
-			({
-				owner,
-				license,
-				stargazers_count,
-				forks_count,
-				homepage,
-				fork,
-				...rest
-			}) => ({
-				owner: owner.login,
-				license: license?.spdx_id || null,
-				stars: stargazers_count,
-				forks: forks_count,
-				homepage: homepage || null,
-				is_fork: fork,
-				...rest,
-			}),
-		);
-	} else if (type === "codeberg") {
-		return SchemaRepoBase.extend({
-			stars_count: z.number(),
-		}).transform(
-			({
-				full_name,
-				owner,
-				license,
-				stars_count,
-				forks_count,
-				homepage,
-				fork,
-				updated_at,
-				...rest
-			}) => ({
-				full_name: "codeberg:" + full_name,
-				owner: owner.login,
-				license: license?.spdx_id || null,
-				stars: stars_count,
-				forks: forks_count,
-				homepage: homepage || null,
-				pushed_at: updated_at,
-				updated_at: updated_at,
-				is_fork: fork,
-				...rest,
-			}),
-		);
-	}
-	fatal(`getSchemaRepo - invalid type ${type}`);
-	return {}; // unreachable
-};
+export const getSchemaRepo = (type) =>
+	SchemaRepoBase.transform((data) => transformRepo(data, type));
 
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -222,8 +192,7 @@ export const initDB = (conn) => {
 		is_fork BOOLEAN,
 		default_branch TEXT,
 		language TEXT
-	);
-`);
+	);`);
 };
 
 /**
@@ -262,9 +231,9 @@ export const zigReposInsert = (conn, parsed) => {
 			item.language,
 		]);
 		upsertMany(rows);
-		logger.info(`zig_repos bulk insert - len ${rows.length}`);
+		logger.info(`db - zigReposInert - len ${rows.length}`);
 	} catch (e) {
-		logger.error(`zig_repos bulk insert - ${e}`);
+		logger.error(`db - zigReposInert - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}
