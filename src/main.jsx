@@ -348,9 +348,9 @@ export const initDB = (conn) => {
  * @param {Database} conn
  * @param {z.infer<ReturnType<typeof getSchemaRepo>>[]} parsed
  */
-export const insertZigRepos = (conn, parsed) => {
+export const upsertZigRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
-		INSERT INTO zig_repos (
+		INSERT OR REPLACE INTO zig_repos (
 			full_name, name, owner, description, homepage, license, 
 			created_at, updated_at, pushed_at, stars, forks, 
 			is_fork, default_branch, language
@@ -380,9 +380,9 @@ export const insertZigRepos = (conn, parsed) => {
 			item.language,
 		]);
 		upsertMany(rows);
-		logger.info(`db - zigReposInsert - len ${rows.length}`);
+		logger.info(`db - upsertZigRepos - len ${rows.length}`);
 	} catch (e) {
-		logger.error(`db - zigReposInsert - ${e}`);
+		logger.error(`db - upsertZigRepos - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}

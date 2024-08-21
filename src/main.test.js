@@ -7,7 +7,7 @@ import {
 	insertDependencies,
 	initDB,
 	processDependencies,
-	insertZigRepos,
+	upsertZigRepos,
 	logger,
 	getZigZonURL,
 	fetchMetadata,
@@ -29,10 +29,7 @@ const getFullName = (type) => {
 		// because the zon has both path and url, good for testing
 		return { full_name: "Copper280z/ZigFOC", default_branch: "main" };
 	} else if (type === "codeberg") {
-		return {
-			full_name: "ziglings/exercises",
-			default_branch: "main",
-		};
+		return { full_name: "ziglings/exercises", default_branch: "main" };
 	}
 	return { full_name: "", default_branch: "" }; //unreachable
 };
@@ -65,11 +62,18 @@ describe("Fetching and insertion", () => {
 		const url = getURL(type);
 		const res = await fetch(url, { headers: getHeaders(type) });
 		const data = await res.json();
-		insertZigRepos(db, [schema.parse(data)]);
+		upsertZigRepos(db, [schema.parse(data)]);
 		const stmt = db.prepare("SELECT * FROM zig_repos WHERE full_name = ?");
 		const result = stmt.get(full_name);
 		expect(result).toBeDefined();
 		expect(result.full_name).toBe(full_name);
+
+		const modified = { ...data, stargazers_count: 33 };
+		upsertZigRepos(db, [schema.parse(modified)]);
+		const result2 = stmt.get(full_name);
+		expect(result2).toBeDefined();
+		expect(result2.full_name).toBe(full_name);
+		expect(result2.stars).toBe(33);
 	});
 
 	it("should fetch Codeberg repo, insert into zig_repos", async () => {
@@ -79,14 +83,14 @@ describe("Fetching and insertion", () => {
 		const url = getURL(type);
 		const res = await fetch(url, { headers: getHeaders(type) });
 		const data = await res.json();
-		insertZigRepos(db, [schema.parse(data)]);
+		upsertZigRepos(db, [schema.parse(data)]);
 		const stmt = db.prepare("SELECT * FROM zig_repos WHERE full_name = ?");
 		const result = stmt.get(`codeberg:${full_name}`);
 		expect(result).toBeDefined();
 		expect(result.full_name).toBe(`codeberg:${full_name}`);
 	});
 
-	it.only("should fetch github metadata and insert to db", async () => {
+	it("should fetch github metadata and insert to db", async () => {
 		const type = "github";
 		const { full_name, default_branch } = getFullName(type);
 		const [zonData, buildData] = await Promise.all([
