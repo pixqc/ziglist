@@ -20,11 +20,18 @@ describe("Repository fetching and insertion", () => {
 		const db = new Database(":memory:");
 		initDB(db);
 		const fetchPromises = ["codeberg", "github"].map(async (type) => {
-			const url = getURL(type);
+			const file = Bun.file(`./.http-cache/test/${type}.json`);
 			const schema = getSchemaRepo(type);
-			const res = await fetch(url, { headers: getHeaders(type) });
-			const data = await res.json();
-			return schema.parse(data);
+			if (file.size === 0) {
+				const url = getURL(type);
+				const res = await fetch(url, { headers: getHeaders(type) });
+				const data = await res.json();
+				Bun.write(file, JSON.stringify(data));
+				return schema.parse(data);
+			} else {
+				const data = await file.text();
+				return schema.parse(JSON.parse(data));
+			}
 		});
 		const parsed = await Promise.all(fetchPromises);
 		console.log(parsed);
