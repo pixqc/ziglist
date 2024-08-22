@@ -232,11 +232,7 @@ describe("Fetching and insertion", () => {
 			const zonData = await zonFile.json();
 			const zonExists = zonData.status === 200;
 			if (!zonExists) continue;
-
-			const parsed = zonExists
-				? SchemaZon.parse(JSON.parse(zon2json(zonData.content)))
-				: null;
-
+			const parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
 			const repoStmt = db.prepare(
 				`SELECT id FROM zig_repos WHERE full_name = ? AND platform = ?`,
 			);
@@ -244,137 +240,57 @@ describe("Fetching and insertion", () => {
 			expect(repoResult).toBeDefined();
 			const repoId = repoResult.id;
 
-			if (parsed) {
-				for (let i = 0; i < 5; i++) {
-					insertUrlDependencies(db, parsed?.urlDeps);
-					upsertDependencies(db, parsed?.deps, repoId);
-				}
+			for (let i = 0; i < 5; i++) {
+				insertUrlDependencies(db, parsed.urlDeps);
+				upsertDependencies(db, parsed.deps, repoId);
 			}
 
-			// // Verify URL dependencies insertion
-			// const urlDepStmt = db.prepare(`
-			// 	SELECT *
-			// 	FROM url_dependencies
-			// 	WHERE hash IN (
-			// 		SELECT url_dependency_hash
-			// 		FROM zig_repo_dependencies
-			// 		WHERE repo_id = ?
-			// 	)
-			// `);
-			// const urlDepResults = urlDepStmt.all(repoId);
-			// expect(urlDepResults).toHaveLength(processedDeps.urlDeps.length);
-			//
-			// for (const expectedUrlDep of processedDeps.urlDeps) {
-			// 	const actualUrlDep = urlDepResults.find(
-			// 		(d) => d.hash === expectedUrlDep.hash,
-			// 	);
-			// 	expect(actualUrlDep).toBeDefined();
-			// 	expect(actualUrlDep).toEqual(
-			// 		expect.objectContaining({
-			// 			hash: expectedUrlDep.hash,
-			// 			name: expectedUrlDep.name,
-			// 			url: expectedUrlDep.url,
-			// 		}),
-			// 	);
-			// }
-			//
-			// // Verify dependencies insertion
-			// const depStmt = db.prepare(
-			// 	`SELECT * FROM zig_repo_dependencies WHERE repo_id = ?`,
-			// );
-			// const depResults = depStmt.all(repoId);
-			// //expect(depResults).toHaveLength(processedDeps.deps.length); // this is wrong because of the way we're inserting right now, if there are 2 deps with the same name, we will only get 1 in the database
-			//
-			// for (const expectedDep of processedDeps.deps) {
-			// 	const actualDep = depResults.find((d) => d.name === expectedDep.name);
-			// 	expect(actualDep).toBeDefined();
-			// 	expect(actualDep).toEqual(
-			// 		expect.objectContaining({
-			// 			repo_id: repoId,
-			// 			name: expectedDep.name,
-			// 			dependency_type: expectedDep.dependency_type,
-			// 			path: expectedDep.path,
-			// 			url_dependency_hash: expectedDep.url_dependency_hash,
-			// 		}),
-			// 	);
-			// }
+			// Verify URL dependencies insertion
+			const urlDepStmt = db.prepare(`
+				SELECT *
+				FROM url_dependencies
+				WHERE hash IN (
+					SELECT url_dependency_hash
+					FROM zig_repo_dependencies
+					WHERE repo_id = ?
+				)
+			`);
+			const urlDepResults = urlDepStmt.all(repoId);
+			expect(urlDepResults).toHaveLength(parsed.urlDeps.length);
+
+			for (const expectedUrlDep of parsed.urlDeps) {
+				const actualUrlDep = urlDepResults.find(
+					(d) => d.hash === expectedUrlDep.hash,
+				);
+				expect(actualUrlDep).toBeDefined();
+				expect(actualUrlDep).toEqual(
+					expect.objectContaining({
+						hash: expectedUrlDep.hash,
+						name: expectedUrlDep.name,
+						url: expectedUrlDep.url,
+					}),
+				);
+			}
+
+			const depStmt = db.prepare(
+				`SELECT * FROM zig_repo_dependencies WHERE repo_id = ?`,
+			);
+			const depResults = depStmt.all(repoId);
+			for (const expectedDep of parsed.deps) {
+				const actualDep = depResults.find((d) => d.name === expectedDep.name);
+				expect(actualDep).toBeDefined();
+				expect(actualDep).toEqual(
+					expect.objectContaining({
+						repo_id: repoId,
+						name: expectedDep.name,
+						dependency_type: expectedDep.dependency_type,
+						path: expectedDep.path,
+						url_dependency_hash: expectedDep.url_dependency_hash,
+					}),
+				);
+			}
 		}
 	});
-
-	// it("should process dependencies and insert to db", async () => {
-	// 	for (const repo of repos) {
-	// 		const zonFile = Bun.file(
-	// 			`./.http-cache/metadata-zon-${repo.platform}-${repo.full_name.replace("/", "-")}.json`,
-	// 		);
-	// 		const zonData = await zonFile.json();
-	// 		if (zonData.status !== 200) continue;
-	//
-	// 		let parsed;
-	// 		try {
-	// 			parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
-	// 			expect(parsed).toBeDefined();
-	// 		} catch (e) {
-	// 			console.error(`Failed to parse zon for ${repo.full_name}: ${e}`);
-	// 		}
-	//
-	// 		const full_name =
-	// 			repo.platform === "codeberg"
-	// 				? `codeberg:${repo.full_name}`
-	// 				: repo.full_name;
-	// 		const processedDeps = processDependencies(full_name, parsed);
-	//
-	// 		insertUrlDependencies(db, processedDeps.urlDeps);
-	// 		insertDependencies(db, processedDeps.deps);
-	//
-	// 		// verify dependencies insertion
-	// 		const depStmt = db.prepare(
-	// 			`SELECT * FROM zig_repo_dependencies WHERE full_name = ?`,
-	// 		);
-	// 		const depResults = depStmt.all(full_name);
-	// 		expect(depResults).toHaveLength(processedDeps.deps.length);
-	//
-	// 		for (const expectedDep of processedDeps.deps) {
-	// 			const actualDep = depResults.find((d) => d.name === expectedDep.name);
-	// 			expect(actualDep).toBeDefined();
-	// 			expect(actualDep).toEqual(
-	// 				expect.objectContaining({
-	// 					full_name: expectedDep.full_name,
-	// 					name: expectedDep.name,
-	// 					dependency_type: expectedDep.dependency_type,
-	// 					path: expectedDep.path,
-	// 					url_dependency_hash: expectedDep.url_dependency_hash,
-	// 				}),
-	// 			);
-	// 		}
-	//
-	// 		// verify URL dependencies insertion
-	// 		const urlDepStmt = db.prepare(`
-	// 			SELECT *
-	// 			FROM url_dependencies
-	// 			WHERE hash IN (
-	// 				SELECT url_dependency_hash
-	// 				FROM zig_repo_dependencies
-	// 				WHERE full_name = ?
-	// 			)
-	// 		`);
-	// 		const urlDepResults = urlDepStmt.all(full_name);
-	// 		expect(urlDepResults).toHaveLength(processedDeps.urlDeps.length);
-	//
-	// 		for (const expectedUrlDep of processedDeps.urlDeps) {
-	// 			const actualUrlDep = urlDepResults.find(
-	// 				(d) => d.hash === expectedUrlDep.hash,
-	// 			);
-	// 			expect(actualUrlDep).toBeDefined();
-	// 			expect(actualUrlDep).toEqual(
-	// 				expect.objectContaining({
-	// 					hash: expectedUrlDep.hash,
-	// 					name: expectedUrlDep.name,
-	// 					url: expectedUrlDep.url,
-	// 				}),
-	// 			);
-	// 		}
-	// 	}
-	// });
 
 	afterAll(() => {
 		db.close();
