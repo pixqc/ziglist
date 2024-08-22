@@ -116,6 +116,84 @@ export const zon2json = (zon) => {
 		});
 };
 
+/**
+ * @param {string} url - return of getBuildZigURL or getZigZonURL
+ * @returns {Promise<{
+ *  status: number,
+ *  fetched_at: number,
+ *  content: string,
+ *  }>}
+ */
+export const fetchMetadata = async (url) => {
+	const response = await fetch(url);
+	return {
+		status: response.status,
+		fetched_at: Math.floor(Date.now() / 1000),
+		content: await response.text(),
+	};
+};
+
+/**
+ * @param {number} unixSecond
+ * @returns {string}
+ */
+const timeAgo = (unixSecond) => {
+	const moment = new Date().getTime() / 1000;
+	const diff = moment - unixSecond;
+	const intervals = [
+		{ label: "yr", seconds: 31536000 },
+		{ label: "wk", seconds: 604800 },
+		{ label: "d", seconds: 86400 },
+		{ label: "hr", seconds: 3600 },
+		{ label: "min", seconds: 60 },
+		{ label: "sec", seconds: 1 },
+	];
+	for (let i = 0; i < intervals.length; i++) {
+		const count = Math.floor(diff / intervals[i].seconds);
+		if (count > 0) {
+			return `${count}${intervals[i].label} ago`;
+		}
+	}
+	return "just now";
+};
+
+/**
+ * 81930 -> 81.9k
+ * 1000 -> 1.0k
+ * 999 -> 999
+ *
+ * @param {number} num - The number to format.
+ * @returns {string} - Formatted number as a string.
+ */
+const formatNumberK = (num) => {
+	if (num < 1000) return num.toString();
+	const thousands = num / 1000;
+	return (Math.floor(thousands * 10) / 10).toFixed(1) + "k";
+};
+
+/**
+ * Some queries are done where it's between two dates, GitHub only returns
+ * 1000 items for a query, this between two date condition makes it possible
+ * to query more than 1000 repos
+ *
+ * @param {Date} start
+ * @param {Date} end
+ * @returns {string}
+ */
+const makeDateRange = (start, end) =>
+	`${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
+
+/**
+ * @param {Date} date
+ * @param {number} months
+ * @returns {Date}
+ */
+const addMonths = (date, months) => {
+	const newDate = new Date(date);
+	newDate.setMonth(newDate.getMonth() + months);
+	return newDate;
+};
+
 // ----------------------------------------------------------------------------
 // queries
 
@@ -526,18 +604,90 @@ export const getZigBuildURL = getMetadataURL("build.zig");
 export const getZigZonURL = getMetadataURL("build.zig.zon");
 
 /**
- * @param {string} url
- * @returns {Promise<{
- *  status: number,
- *  fetched_at: number,
- *  content: string,
- *  }>}
+ * @param {'github' | 'codeberg'} platform
+ * @returns {string}
  */
-export const fetchMetadata = async (url) => {
-	const response = await fetch(url);
-	return {
-		status: response.status,
-		fetched_at: Math.floor(Date.now() / 1000),
-		content: await response.text(),
+export const getTopRepoURL = (platform) => {
+	if (platform === "github") {
+		const base = "https://api.github.com/search/repositories";
+		const query = "language:zig";
+		return `${base}?q=${encodeURIComponent(query)}&per_page=100&page=1`;
+	} else if (platform === "codeberg") {
+		const base = "https://codeberg.org/api/v1/repos/search";
+		const query = "language:zig";
+		return `${base}?q=${encodeURIComponent(query)}&includeDesc=true&page=1&limit=50`;
+	}
+	fatal(`getRepoURL - invalid platform ${platform}`);
+	return ""; // unreachable
+};
+
+/**
+ * the date range is used to fetch all repos from github, it's hardcoded
+ * to make sure the query returns <1k items per
+ */
+const createDateGenerator = () => {
+	// first index: zig init date,
+	// commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
+	const dates = [
+		new Date("2015-07-04"),
+		new Date("2017-09-02"),
+		new Date("2019-02-09"),
+		new Date("2020-01-11"),
+		new Date("2020-08-22"),
+		new Date("2021-02-27"),
+		new Date("2021-07-31"),
+		new Date("2021-12-18"),
+		new Date("2022-04-16"),
+		new Date("2022-07-30"),
+		new Date("2022-11-19"),
+		new Date("2023-02-25"),
+		new Date("2023-05-20"),
+		new Date("2023-07-29"),
+		new Date("2023-09-30"),
+		new Date("2023-12-02"),
+		new Date("2024-01-20"),
+		new Date("2024-03-16"),
+		new Date("2024-05-04"),
+	];
+
+	let index = 0;
+	let monthsAfterLast = 0;
+
+	return function* () {
+		while (true) {
+			let start, end;
+			if (index < dates.length - 1) {
+				start = dates[index];
+				end = dates[index + 1];
+				index++;
+			} else {
+				start = addMonths(dates[dates.length - 1], monthsAfterLast);
+				end = addMonths(dates[dates.length - 1], monthsAfterLast + 1);
+				monthsAfterLast++;
+				if (end > new Date()) {
+					index = 0;
+					monthsAfterLast = 0;
+				}
+			}
+			yield { start, end };
+		}
 	};
+};
+const dateGenerator = createDateGenerator();
+
+/**
+ * @param {'github' | 'codeberg'} platform
+ * @returns {string}
+ */
+const getAllRepoURL = (platform) => {
+	if (platform === "github") {
+		const base = "https://api.github.com/search/repositories";
+		const { start, end } = dateGenerator().next().value;
+		const dateRange = makeDateRange(start, end);
+		const query = `in:name,description,topics zig created:${dateRange}`;
+		return `${base}?q=${encodeURIComponent(query)}&per_page=100&page=1`;
+	}
+	// codeberg's top url contain all repos, it's unused here
+	fatal(`getRepoURL - invalid platform ${platform}`);
+	return ""; // unreachable
 };
