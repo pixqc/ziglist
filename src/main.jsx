@@ -194,6 +194,22 @@ const addMonths = (date, months) => {
 	return newDate;
 };
 
+/**
+ * @param {Response} response
+ * @returns {string | undefined}
+ */
+export const getNextURL = (response) => {
+	let next;
+	const linkHeader = response.headers.get("link");
+	if (linkHeader) {
+		const nextLink = linkHeader
+			.split(",")
+			.find((part) => part.includes('rel="next"'));
+		next = nextLink?.match(/<(.*)>/)?.[1];
+	}
+	return next;
+};
+
 // ----------------------------------------------------------------------------
 // queries
 
@@ -679,7 +695,7 @@ const dateGenerator = createDateGenerator();
  * @param {'github' | 'codeberg'} platform
  * @returns {string}
  */
-const getAllRepoURL = (platform) => {
+export const getAllRepoURL = (platform) => {
 	if (platform === "github") {
 		const base = "https://api.github.com/search/repositories";
 		const { start, end } = dateGenerator().next().value;

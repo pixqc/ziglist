@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import {
 	getSchemaRepo,
 	getHeaders,
+	getTopRepoURL,
 	insertUrlDependencies,
 	upsertDependencies,
 	initDB,
@@ -13,7 +14,9 @@ import {
 	SchemaZon,
 	zon2json,
 	getZigBuildURL,
+	getAllRepoURL,
 	upsertMetadata,
+	getNextURL,
 } from "./main.jsx";
 
 /** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
@@ -55,7 +58,7 @@ const getURL = (repo) => {
 /**
  * @param {Repo} repo
  * @returns {Promise<void>} */
-const fetchWriteRepo = async (repo) => {
+const cacheRepo = async (repo) => {
 	const filename = getCacheFilename("repo", repo);
 	const file = Bun.file(filename);
 	if (file.size > 0) return;
@@ -68,7 +71,7 @@ const fetchWriteRepo = async (repo) => {
 /**
  * @param {Repo} repo
  * @returns {Promise<void>} */
-const fetchWriteMetadata = async (repo) => {
+const cacheMetadata = async (repo) => {
 	const zigFilename = getCacheFilename("metadata-zig", repo);
 	const zonFilename = getCacheFilename("metadata-zon", repo);
 	const zigFile = Bun.file(zigFilename);
@@ -85,15 +88,35 @@ const fetchWriteMetadata = async (repo) => {
 	}
 };
 
+/**
+ * @param {'github' | 'codeberg'} platform
+ * @param {number} pages
+ * @returns {Promise<void>}
+ */
+const cacheTopRepos = async (platform, pages) => {
+	let url = getTopRepoURL(platform);
+	for (let i = 1; i <= pages; i++) {
+		const filename = `./.http-cache/${platform}-top-${i}.json`;
+		const file = Bun.file(filename);
+		if (file.size > 0) continue; // Skip if file exists
+		const response = await fetch(url, { headers: getHeaders(platform) });
+		const data = await response.json();
+		await Bun.write(file, JSON.stringify(data));
+		// @ts-ignore - wont be undefined
+		url = getNextURL(response);
+	}
+};
+
 describe("db inserts and reads", () => {
 	let db;
 	beforeAll(async () => {
-		await Promise.all(
-			repos.flatMap((repo) => [fetchWriteRepo(repo), fetchWriteMetadata(repo)]),
-		);
+		const promises = repos.flatMap((repo) => [
+			cacheRepo(repo),
+			cacheMetadata(repo),
+		]);
+		await Promise.all(promises);
 
-		db = new Database("a.sqlite");
-
+		db = new Database(":memory:");
 		initDB(db);
 	});
 
@@ -242,19 +265,20 @@ describe("db inserts and reads", () => {
 
 			// intentionally duplicated
 			for (let i = 0; i < 5; i++) {
-				insertUrlDependencies(db, parsed.urlDeps);
-				upsertDependencies(db, parsed.deps, repoId);
+				if (parsed.urlDeps.length > 0)
+					insertUrlDependencies(db, parsed.urlDeps);
+				if (parsed.deps.length > 0) upsertDependencies(db, parsed.deps, repoId);
 			}
 
-			const urlDepStmt = db.prepare(`
-				SELECT *
+			const urlDepStmt = db.prepare(
+				`SELECT *
 				FROM url_dependencies
 				WHERE hash IN (
 					SELECT url_dependency_hash
 					FROM zig_repo_dependencies
 					WHERE repo_id = ?
-				)
-			`);
+				)`,
+			);
 			const urlDepResults = urlDepStmt.all(repoId);
 			expect(urlDepResults).toHaveLength(parsed.urlDeps.length);
 			for (const expectedUrlDep of parsed.urlDeps) {
@@ -273,8 +297,8 @@ describe("db inserts and reads", () => {
 
 			const depStmt = db.prepare(
 				`SELECT *
-					FROM zig_repo_dependencies
-					WHERE repo_id = ?`,
+				FROM zig_repo_dependencies
+				WHERE repo_id = ?`,
 			);
 			const depResults = depStmt.all(repoId);
 			expect(depResults).toHaveLength(parsed.deps.length);
@@ -298,8 +322,7 @@ describe("db inserts and reads", () => {
 		for (const repo of repos) {
 			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
 			const zonData = await zonFile.json();
-			const zonExists = zonData.status === 200;
-			if (!zonExists) continue;
+			if (zonData.status !== 200) continue;
 			const parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
 			const repoStmt = db.prepare(
 				`SELECT id
@@ -310,15 +333,16 @@ describe("db inserts and reads", () => {
 			expect(repoResult).toBeDefined();
 			const repoId = repoResult.id;
 
-			const joinStmt = db.prepare(`
-				SELECT 
+			const joinStmt = db.prepare(
+				`SELECT 
 					r.*,
 					GROUP_CONCAT(d.name) AS dependencies
 				FROM zig_repos r
 				LEFT JOIN zig_repo_dependencies d ON r.id = d.repo_id
 				WHERE r.id = ?
 				GROUP BY r.id
-			`);
+			`,
+			);
 			const joinResult = joinStmt.get(repoId);
 			const dbSet = new Set(joinResult.dependencies.split(","));
 			const parsedSet = new Set(parsed.deps.map((d) => d.name));
@@ -329,5 +353,32 @@ describe("db inserts and reads", () => {
 	afterAll(() => {
 		db.close();
 		logger.flush();
+	});
+});
+
+describe("fetches", () => {
+	beforeAll(async () => {
+		await Promise.all([
+			cacheTopRepos("github", 2),
+			// cacheTopRepos("codeberg", 2),
+		]);
+	});
+
+	it.only("should parse top repos", async () => {
+		["1", "2"].forEach(async (page) => {
+			const filename = `./.http-cache/github-top-${page}.json`;
+			const file = Bun.file(filename);
+			const data = await file.json();
+			const schema = getSchemaRepo("github");
+			for (const item of data.items) {
+				const tryParsed = schema.safeParse(item);
+				if (!tryParsed.success) console.error(tryParsed.error);
+				expect(tryParsed.success).toBe(true);
+			}
+		});
+	});
+
+	it("should have a generator that loops", async () => {
+		// generate 100 times, make sure "2015-07-04" happens at least twice
 	});
 });
