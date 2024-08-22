@@ -50,7 +50,8 @@ export const createLogger = () => {
 			message,
 			data,
 		};
-
+		if (level === "error") console.error(JSON.stringify(logEntry));
+		else console.log(JSON.stringify(logEntry));
 		buffer.push(JSON.stringify(logEntry));
 	};
 
@@ -212,7 +213,7 @@ export const upsertMetadata = (conn, parsed) => {
 			for (const row of data) {
 				stmt.run(
 					row.repo_id,
-					row.min_zig_version ?? null,
+					row.min_zig_version,
 					row.build_zig_exists,
 					row.build_zig_zon_exists,
 					row.fetched_at,
