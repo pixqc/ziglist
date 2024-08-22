@@ -144,7 +144,8 @@ export const initDB = (conn) => {
 		default_branch TEXT,
 		language TEXT,
 		UNIQUE (platform, full_name)
-	);
+	);`);
+	conn.exec(`
 	CREATE TABLE IF NOT EXISTS zig_repo_metadata (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo_id INTEGER NOT NULL, 
@@ -153,14 +154,16 @@ export const initDB = (conn) => {
 		build_zig_zon_exists BOOLEAN NULL,
 		fetched_at INTEGER NULL,
 		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
-		ON DELETE CASCADE, 
+			ON DELETE CASCADE, 
 		UNIQUE(repo_id) 
-	);
+	);`);
+	conn.exec(`
 	CREATE TABLE IF NOT EXISTS url_dependencies (
 		hash TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		url TEXT NOT NULL
-	);
+	);`);
+	conn.exec(`
 	CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo_id INTEGER NOT NULL,
@@ -169,12 +172,11 @@ export const initDB = (conn) => {
 		path TEXT,
 		url_dependency_hash TEXT,
 		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
-		ON DELETE CASCADE,
+				ON DELETE CASCADE,
 		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
 		UNIQUE(repo_id, name, dependency_type, path),
 		UNIQUE(repo_id, name, dependency_type, url_dependency_hash)
-	);
-`);
+	);`);
 };
 
 /**
@@ -232,19 +234,36 @@ export const upsertMetadata = (conn, parsed) => {
  */
 export const upsertZigRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
-		INSERT OR REPLACE INTO zig_repos (
+		INSERT INTO zig_repos (
 			platform, full_name, name, owner, description, homepage, license, 
 			created_at, updated_at, pushed_at, stars, forks, 
 			is_fork, is_archived, default_branch, language
 		)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`);
+		ON CONFLICT (platform, full_name) DO UPDATE SET
+			name = excluded.name,
+			owner = excluded.owner,
+			description = excluded.description,
+			homepage = excluded.homepage,
+			license = excluded.license,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			pushed_at = excluded.pushed_at,
+			stars = excluded.stars,
+			forks = excluded.forks,
+			is_fork = excluded.is_fork,
+			is_archived = excluded.is_archived,
+			default_branch = excluded.default_branch,
+			language = excluded.language
+		`);
+
 	try {
 		const upsertMany = conn.transaction((data) => {
 			for (const row of data) {
 				stmt.run(row);
 			}
 		});
+
 		const rows = parsed.map((item) => [
 			item.platform,
 			item.full_name,
@@ -263,10 +282,86 @@ export const upsertZigRepos = (conn, parsed) => {
 			item.default_branch,
 			item.language,
 		]);
+
 		upsertMany(rows);
 		logger.info(`db - upsertZigRepos - len ${rows.length}`);
 	} catch (e) {
 		logger.error(`db - upsertZigRepos - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
+
+/** @typedef {Object} UrlDependency
+ * @property {string} hash
+ * @property {string} name
+ * @property {string} url
+ */
+
+/**
+ * @param {Database} conn
+ * @param {UrlDependency[]} parsed
+ */
+export const insertUrlDependencies = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+		VALUES (?, ?, ?)`);
+	try {
+		const insertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(row);
+			}
+		});
+		const rows = parsed.map((item) => [item.hash, item.name, item.url]);
+		insertMany(rows);
+		logger.info(`db - insertUrlDependencies - len ${rows.length}`);
+	} catch (e) {
+		logger.error(`db - insertUrlDependencies - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
+
+/** @typedef {Object} ZigRepoDependency
+ * @property {string} full_name
+ * @property {string} name
+ * @property {string} dependency_type
+ * @property {string|null} path
+ * @property {string|null} url_dependency_hash
+ */
+
+/**
+ * @param {Database} conn
+ * @param {ZigRepoDependency[]} parsed
+ * @param {number} repo_id
+ */
+export const upsertDependencies = (conn, parsed, repo_id) => {
+	const stmt = conn.prepare(`
+		INSERT INTO zig_repo_dependencies (
+			repo_id, name, dependency_type, path, url_dependency_hash
+		) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (repo_id, name, dependency_type, path) 
+		DO UPDATE SET
+			url_dependency_hash = excluded.url_dependency_hash
+		ON CONFLICT (repo_id, name, dependency_type, url_dependency_hash) 
+		DO UPDATE SET
+			path = excluded.path`);
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(
+					repo_id,
+					row.name,
+					row.dependency_type,
+					row.dependency_type === "path" ? row.path : null,
+					row.dependency_type === "url" ? row.url_dependency_hash : null,
+				);
+			}
+		});
+		upsertMany(parsed);
+		logger.info(`db - upsertDependencies - len ${parsed.length}`);
+	} catch (e) {
+		logger.error(`db - upsertDependencies - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}
@@ -323,27 +418,69 @@ const transformRepo = (data, platform) => ({
 export const getSchemaRepo = (platform) =>
 	SchemaRepoBase.transform((data) => transformRepo(data, platform));
 
-export const SchemaZon = z.object({
-	name: z.string(),
-	version: z.string(),
-	minimum_zig_version: z.string().optional(),
-	paths: z.array(z.string()).optional(),
-	dependencies: z
-		.record(
-			z.union([
-				z.object({
-					url: z.string(),
-					hash: z.string(),
-					lazy: z.boolean().optional(),
-				}),
-				z.object({
-					path: z.string(),
-					lazy: z.boolean().optional(),
-				}),
-			]),
-		)
-		.optional(),
-});
+const SchemaZonDependency = z.union([
+	z.object({
+		url: z.string(),
+		hash: z.string(),
+		lazy: z.boolean().optional(),
+	}),
+	z.object({
+		path: z.string(),
+		lazy: z.boolean().optional(),
+	}),
+]);
+const SchemaZonDependencies = z.record(SchemaZonDependency);
+
+/**
+ * @param {z.infer<typeof SchemaZonDependencies>} dependencies
+ */
+const transformDependencies = (dependencies) => {
+	const urlDeps = [];
+	const deps = [];
+	Object.entries(dependencies).forEach(([name, dep]) => {
+		if ("url" in dep && "hash" in dep) {
+			deps.push({
+				name: name,
+				dependency_type: "url",
+				path: null,
+				url_dependency_hash: dep.hash,
+			});
+			urlDeps.push({
+				name: name,
+				url: dep.url,
+				hash: dep.hash,
+			});
+		} else if ("path" in dep) {
+			deps.push({
+				name: name,
+				dependency_type: "path",
+				path: dep.path,
+				url_dependency_hash: null,
+			});
+		}
+	});
+	return { urlDeps, deps };
+};
+
+export const SchemaZon = z
+	.object({
+		name: z.string(),
+		version: z.string(),
+		minimum_zig_version: z.string().optional(),
+		paths: z.array(z.string()).optional(),
+		dependencies: SchemaZonDependencies.optional(),
+	})
+	.transform((data) => {
+		const { dependencies, ...rest } = data;
+		const { urlDeps, deps } = dependencies
+			? transformDependencies(dependencies)
+			: { urlDeps: [], deps: [] };
+		return {
+			...rest,
+			urlDeps,
+			deps,
+		};
+	});
 
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
@@ -402,86 +539,4 @@ export const fetchMetadata = async (url) => {
 		fetched_at: Math.floor(Date.now() / 1000),
 		content: await response.text(),
 	};
-};
-
-export const processDependencies = (full_name, parsed) => {
-	const urlDeps = [];
-	const deps = [];
-
-	Object.entries(parsed.dependencies).forEach(([name, dep]) => {
-		if ("url" in dep && "hash" in dep) {
-			deps.push({
-				full_name,
-				name: name,
-				dependency_type: "url",
-				path: null,
-				url_dependency_hash: dep.hash,
-			});
-			urlDeps.push({
-				name: name,
-				url: dep.url,
-				hash: dep.hash,
-			});
-		} else if ("path" in dep) {
-			deps.push({
-				full_name,
-				name: name,
-				dependency_type: "path",
-				path: dep.path,
-				url_dependency_hash: null,
-			});
-		}
-	});
-
-	return { urlDeps, deps };
-};
-
-export const insertUrlDependencies = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT OR IGNORE INTO url_dependencies (hash, name, url)
-		VALUES (?, ?, ?)
-	`);
-
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
-		const rows = parsed.map((item) => [item.hash, item.name, item.url]);
-		upsertMany(rows);
-		logger.info(`url_dependencies bulk insert - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`url_dependencies bulk insert - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
-
-export const insertDependencies = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT OR REPLACE INTO zig_repo_dependencies (
-			full_name, name, dependency_type, path, url_dependency_hash
-		) VALUES (?, ?, ?, ?, ?)`);
-
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
-
-		const rows = parsed.map((item) => [
-			item.full_name,
-			item.name,
-			item.dependency_type,
-			item.path,
-			item.url_dependency_hash,
-		]);
-
-		upsertMany(rows);
-		logger.info(`zig_repo_dependencies bulk insert - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`zig_repo_dependencies bulk insert - ${e}`);
-	}
 };
