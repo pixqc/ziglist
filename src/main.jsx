@@ -50,8 +50,8 @@ export const createLogger = () => {
 			message,
 			data,
 		};
-		if (level === "error") console.error(JSON.stringify(logEntry));
-		else console.log(JSON.stringify(logEntry));
+		// if (level === "error") console.error(JSON.stringify(logEntry));
+		// else console.log(JSON.stringify(logEntry));
 		buffer.push(JSON.stringify(logEntry));
 	};
 
@@ -689,7 +689,8 @@ const createDateGenerator = () => {
 		}
 	};
 };
-const dateGenerator = createDateGenerator();
+
+export const dateGenerator = createDateGenerator();
 
 /**
  * @param {'github' | 'codeberg'} platform

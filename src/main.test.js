@@ -1,4 +1,5 @@
 import { expect, describe, beforeAll, afterAll, test } from "bun:test";
+import { Glob } from "bun";
 import { Database } from "bun:sqlite";
 import {
 	getSchemaRepo,
@@ -17,6 +18,7 @@ import {
 	getAllRepoURL,
 	upsertMetadata,
 	getNextURL,
+	dateGenerator,
 } from "./main.jsx";
 
 /** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
@@ -347,12 +349,35 @@ const cacheTopRepos = async (platform, pages) => {
 	for (let i = 1; i <= pages; i++) {
 		const filename = `./.http-cache/${platform}-top-${i}.json`;
 		const file = Bun.file(filename);
-		if (file.size > 0) continue; // Skip if file exists
+		if (file.size > 0) continue;
 		const response = await fetch(url, { headers: getHeaders(platform) });
 		const data = await response.json();
 		await Bun.write(file, JSON.stringify(data));
 		// @ts-ignore - wont be undefined
 		url = getNextURL(response);
+	}
+};
+
+/**
+ * only the first page, go through all date ranges, github only
+ *
+ * @param {'github' | 'codeberg'} platform
+ * @returns {Promise<void>}
+ */
+const cacheAllRepos = async (platform) => {
+	let idx = 1;
+	while (true) {
+		const filename = `./.http-cache/${platform}-all-${idx}.json`;
+		const file = Bun.file(filename);
+		if (file.size > 0) {
+			idx++;
+			continue;
+		}
+		const url = getAllRepoURL(platform);
+		if (idx !== 1 && url.includes("2015-07-04")) break;
+		const response = await fetch(url, { headers: getHeaders(platform) });
+		const data = await response.json();
+		await Bun.write(Bun.file(filename), JSON.stringify(data));
 	}
 };
 
@@ -362,6 +387,7 @@ describe("fetches", () => {
 		await Promise.all([
 			cacheTopRepos("github", 2),
 			cacheTopRepos("codeberg", 2),
+			cacheAllRepos("github"),
 		]);
 
 		db = new Database(":memory:");
@@ -398,8 +424,24 @@ describe("fetches", () => {
 		});
 	});
 
+	test("items from fetch all should be below 1k", async () => {
+		const glob = new Glob("./.http-cache/github-all-*.json");
+		for await (const filename of glob.scan({ dot: true })) {
+			const file = Bun.file(filename);
+			const data = await file.json();
+			expect(data.total_count).toBeLessThan(1000);
+		}
+	});
+
 	test("should have a generator that loops", async () => {
-		// generate 100 times, make sure "2015-07-04" happens at least twice
+		const starts = [];
+		for (let i = 0; i < 100; i++) {
+			const { start } = dateGenerator().next().value;
+			starts.push(start.toISOString().slice(0, 10));
+		}
+		const countOccurrences = (date) => starts.filter((d) => d === date).length;
+		expect(countOccurrences("2015-07-04")).toBeGreaterThanOrEqual(2);
+		expect(countOccurrences("2024-01-20")).toBeGreaterThanOrEqual(2);
 	});
 
 	afterAll(() => {
