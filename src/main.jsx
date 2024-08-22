@@ -6,12 +6,13 @@ import { appendFileSync } from "node:fs";
 // - are there more fields i need to add? just in case
 // - the github all url generator can be hardcoded, no need to addWeeks
 
+/** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
+/** @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel */
+
 // ----------------------------------------------------------------------------
 // utils
 
 /**
- * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
- *
  * @returns {{
  *   trace: (message: string, data?: any) => void,
  *   debug: (message: string, data?: any) => void,
@@ -374,15 +375,15 @@ export const getHeaders = (platform) => {
 
 /**
  * @param {string} filename
- * @returns {(platform: 'github' | 'codeberg', full_name: string, default_branch: string) => string}
+ * @returns {(repo: Repo) => string}
  */
-const getMetadataURL = (filename) => (platform, full_name, default_branch) => {
-	if (platform === "github") {
-		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/${filename}`;
-	} else if (platform === "codeberg") {
-		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/${filename}`;
+const getMetadataURL = (filename) => (repo) => {
+	if (repo.platform === "github") {
+		return `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/${filename}`;
+	} else if (repo.platform === "codeberg") {
+		return `https://codeberg.org/${repo.full_name}/raw/branch/${repo.default_branch}/${filename}`;
 	}
-	fatal(`getZigBuildURL - invalid platform ${platform}`);
+	fatal(`getMetadataURL - invalid platform ${repo.platform}`);
 	return ""; // unreachable
 };
 

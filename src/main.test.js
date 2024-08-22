@@ -17,8 +17,10 @@ import {
 	upsertMetadata,
 } from "./main.jsx";
 
+/** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
+
 // biome-ignore format: off
-/** @type {Array<{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}>} */
+/** @type {Array<Repo>} */
 const repos = [
 	{ full_name: "ziglang/zig", default_branch: "master", platform: "github" },
 	{ full_name: "ggerganov/ggml", default_branch: "master", platform: "github" },
@@ -27,66 +29,58 @@ const repos = [
 	{ full_name: "grayhatter/player", default_branch: "main", platform: "codeberg" },
 	{ full_name: "ziglings/exercises", default_branch: "main", platform: "codeberg" },
 ];
-
 const CACHE_DIR = "./.http-cache";
 
 /**
  * @param {'repo' | 'metadata-zig' | 'metadata-zon'} type
- * @param {'github' | 'codeberg'} platform
- * @param {string} full_name
+ * @param {Repo} repo
  * @returns {string}
  */
-const getCacheFilename = (type, platform, full_name) => {
-	return `${CACHE_DIR}/${type}-${platform}-${full_name.replace("/", "-")}.json`;
+const getCacheFilename = (type, repo) => {
+	return `${CACHE_DIR}/${type}-${repo.platform}-${repo.full_name.replace("/", "-")}.json`;
 };
 
 /**
- * @param {'github' | 'codeberg'} type
- * @param {string} full_name
+ * @param {Repo} repo
  * @returns {string}
  */
-const getURL = (type, full_name) => {
-	if (type === "github") {
-		return `https://api.github.com/repos/${full_name}`;
-	} else if (type === "codeberg") {
-		return `https://codeberg.org/api/v1/repos/${full_name}`;
+const getURL = (repo) => {
+	if (repo.platform === "github") {
+		return `https://api.github.com/repos/${repo.full_name}`;
+	} else if (repo.platform === "codeberg") {
+		return `https://codeberg.org/api/v1/repos/${repo.full_name}`;
 	}
 	return ""; // unreachable
 };
 
 /**
- * @param {'github' | 'codeberg'} type
- * @param {{full_name: string, default_branch: string}} repo
+ * @param {Repo} repo
  * @returns {Promise<void>} */
-const fetchWriteRepo = async (type, repo) => {
-	const filename = getCacheFilename("repo", type, repo.full_name);
+const fetchWriteRepo = async (repo) => {
+	const filename = getCacheFilename("repo", repo);
 	const file = Bun.file(filename);
 	if (file.size > 0) return;
-	const url = getURL(type, repo.full_name);
-	const res = await fetch(url, { headers: getHeaders(type) });
+	const url = getURL(repo);
+	const res = await fetch(url, { headers: getHeaders(repo.platform) });
 	const data = await res.json();
 	await Bun.write(file, JSON.stringify(data));
 };
 
 /**
- * @param {'github' | 'codeberg'} type
- * @param {{full_name: string, default_branch: string}} repo
+ * @param {Repo} repo
  * @returns {Promise<void>} */
-const fetchWriteMetadata = async (type, repo) => {
-	const zigFilename = getCacheFilename("metadata-zig", type, repo.full_name);
-	const zonFilename = getCacheFilename("metadata-zon", type, repo.full_name);
-
+const fetchWriteMetadata = async (repo) => {
+	const zigFilename = getCacheFilename("metadata-zig", repo);
+	const zonFilename = getCacheFilename("metadata-zon", repo);
 	const zigFile = Bun.file(zigFilename);
 	const zonFile = Bun.file(zonFilename);
-
 	if (zigFile.size === 0) {
-		const zigUrl = getZigBuildURL(type, repo.full_name, repo.default_branch);
+		const zigUrl = getZigBuildURL(repo);
 		const zigResponse = await fetchMetadata(zigUrl);
 		await Bun.write(zigFile, JSON.stringify(zigResponse));
 	}
-
 	if (zonFile.size === 0) {
-		const zonUrl = getZigZonURL(type, repo.full_name, repo.default_branch);
+		const zonUrl = getZigZonURL(repo);
 		const zonResponse = await fetchMetadata(zonUrl);
 		await Bun.write(zonFile, JSON.stringify(zonResponse));
 	}
@@ -96,10 +90,7 @@ describe("Fetching and insertion", () => {
 	let db;
 	beforeAll(async () => {
 		await Promise.all(
-			repos.flatMap((repo) => [
-				fetchWriteRepo(repo.platform, repo),
-				fetchWriteMetadata(repo.platform, repo),
-			]),
+			repos.flatMap((repo) => [fetchWriteRepo(repo), fetchWriteMetadata(repo)]),
 		);
 
 		db = new Database("abcd.sqlite");
@@ -110,7 +101,7 @@ describe("Fetching and insertion", () => {
 		for (const repo of repos) {
 			const platform = repo.platform;
 			const schema = getSchemaRepo(platform);
-			const file = Bun.file(getCacheFilename("repo", platform, repo.full_name));
+			const file = Bun.file(getCacheFilename("repo", repo));
 			let data = await file.json();
 
 			upsertZigRepos(db, [schema.parse(data)]);
