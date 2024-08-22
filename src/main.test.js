@@ -85,7 +85,7 @@ const fetchWriteMetadata = async (repo) => {
 	}
 };
 
-describe("Fetching and insertion", () => {
+describe("db inserts and reads", () => {
 	let db;
 	beforeAll(async () => {
 		await Promise.all(
@@ -240,12 +240,12 @@ describe("Fetching and insertion", () => {
 			expect(repoResult).toBeDefined();
 			const repoId = repoResult.id;
 
+			// intentionally duplicated
 			for (let i = 0; i < 5; i++) {
 				insertUrlDependencies(db, parsed.urlDeps);
 				upsertDependencies(db, parsed.deps, repoId);
 			}
 
-			// Verify URL dependencies insertion
 			const urlDepStmt = db.prepare(`
 				SELECT *
 				FROM url_dependencies
@@ -257,7 +257,6 @@ describe("Fetching and insertion", () => {
 			`);
 			const urlDepResults = urlDepStmt.all(repoId);
 			expect(urlDepResults).toHaveLength(parsed.urlDeps.length);
-
 			for (const expectedUrlDep of parsed.urlDeps) {
 				const actualUrlDep = urlDepResults.find(
 					(d) => d.hash === expectedUrlDep.hash,
@@ -273,9 +272,12 @@ describe("Fetching and insertion", () => {
 			}
 
 			const depStmt = db.prepare(
-				`SELECT * FROM zig_repo_dependencies WHERE repo_id = ?`,
+				`SELECT *
+					FROM zig_repo_dependencies
+					WHERE repo_id = ?`,
 			);
 			const depResults = depStmt.all(repoId);
+			expect(depResults).toHaveLength(parsed.deps.length);
 			for (const expectedDep of parsed.deps) {
 				const actualDep = depResults.find((d) => d.name === expectedDep.name);
 				expect(actualDep).toBeDefined();
@@ -289,6 +291,38 @@ describe("Fetching and insertion", () => {
 					}),
 				);
 			}
+		}
+	});
+
+	it("should match deps parsed data with joined database entries", async () => {
+		for (const repo of repos) {
+			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
+			const zonData = await zonFile.json();
+			const zonExists = zonData.status === 200;
+			if (!zonExists) continue;
+			const parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
+			const repoStmt = db.prepare(
+				`SELECT id
+					FROM zig_repos
+					WHERE full_name = ? AND platform = ?`,
+			);
+			const repoResult = repoStmt.get(repo.full_name, repo.platform);
+			expect(repoResult).toBeDefined();
+			const repoId = repoResult.id;
+
+			const joinStmt = db.prepare(`
+				SELECT 
+					r.*,
+					GROUP_CONCAT(d.name) AS dependencies
+				FROM zig_repos r
+				LEFT JOIN zig_repo_dependencies d ON r.id = d.repo_id
+				WHERE r.id = ?
+				GROUP BY r.id
+			`);
+			const joinResult = joinStmt.get(repoId);
+			const dbSet = new Set(joinResult.dependencies.split(","));
+			const parsedSet = new Set(parsed.deps.map((d) => d.name));
+			expect(dbSet).toEqual(parsedSet);
 		}
 	});
 
