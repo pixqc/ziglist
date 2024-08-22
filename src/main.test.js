@@ -93,32 +93,127 @@ describe("Fetching and insertion", () => {
 			repos.flatMap((repo) => [fetchWriteRepo(repo), fetchWriteMetadata(repo)]),
 		);
 
-		db = new Database("abcd.sqlite");
+		db = new Database(":memory:");
 		initDB(db);
 	});
 
-	it("should fetch repos and insert into zig_repos", async () => {
+	it("should not insert duplicate repos", async () => {
+		for (const repo of repos) {
+			const platform = repo.platform;
+			const schema = getSchemaRepo(platform);
+			const file = Bun.file(getCacheFilename("repo", repo));
+			const data = await file.json();
+			const parsed = schema.parse(data);
+
+			upsertZigRepos(db, [parsed, parsed, parsed]);
+			const stmt = db.prepare(
+				`SELECT * 
+					FROM zig_repos 
+					WHERE full_name = ? AND platform = ?`,
+			);
+			const result = stmt.all(repo.full_name, repo.platform);
+			expect(result).toHaveLength(1);
+			expect(result[0].full_name).toBe(repo.full_name);
+			expect(result[0].platform).toBe(repo.platform);
+		}
+	});
+
+	it("should upsert repo properly", async () => {
 		for (const repo of repos) {
 			const platform = repo.platform;
 			const schema = getSchemaRepo(platform);
 			const file = Bun.file(getCacheFilename("repo", repo));
 			let data = await file.json();
+			data.description = data.description + "!";
+			const parsed = schema.parse(data);
 
-			upsertZigRepos(db, [schema.parse(data)]);
+			upsertZigRepos(db, [parsed]);
 			const stmt = db.prepare(
-				"SELECT * FROM zig_repos WHERE platform = ? AND full_name = ?",
+				`SELECT * 
+					FROM zig_repos 
+					WHERE full_name = ? AND platform = ?`,
 			);
-			let result = stmt.get(repo.platform, repo.full_name);
-			expect(result).toBeDefined();
-			expect(result.full_name).toBe(repo.full_name);
-			expect(result.platform).toBe(repo.platform);
+			const result = stmt.all(repo.full_name, repo.platform);
+			expect(result).toHaveLength(1);
+			expect(result[0].full_name).toBe(repo.full_name);
+			expect(result[0].description).toEndWith("!");
+		}
+	});
 
-			// check upsert
-			data = { ...data, description: data.description + "!" };
-			upsertZigRepos(db, [schema.parse(data)]);
-			result = stmt.get(repo.platform, repo.full_name);
-			expect(result).toBeDefined();
-			expect(result.description).toBe(data.description);
+	it("should not insert duplicate metadata", async () => {
+		for (const repo of repos) {
+			const zigFile = Bun.file(getCacheFilename("metadata-zig", repo));
+			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
+			const buildData = await zigFile.json();
+			const zonData = await zonFile.json();
+
+			const parsed =
+				zonData.status === 200
+					? SchemaZon.parse(JSON.parse(zon2json(zonData.content)))
+					: null;
+
+			const repoStmt = db.prepare(
+				`SELECT id
+					FROM zig_repos 
+					WHERE full_name = ? AND platform = ?`,
+			);
+			const repoResult = repoStmt.get(repo.full_name, repo.platform);
+			expect(repoResult).toBeDefined();
+			const repoId = repoResult.id;
+
+			const metadata = {
+				repo_id: repoId,
+				min_zig_version: parsed?.minimum_zig_version ?? null,
+				build_zig_exists: buildData.status === 200,
+				build_zig_zon_exists: zonData.status === 200,
+				fetched_at: zonData.fetched_at,
+			};
+			upsertMetadata(db, [metadata, metadata, metadata]);
+
+			const stmt = db.prepare(
+				`SELECT * 
+					FROM zig_repo_metadata 
+					WHERE repo_id = ?`,
+			);
+			const result = stmt.all(repoId);
+			expect(result).toHaveLength(1);
+			expect(result[0].repo_id).toBe(repoId);
+			expect(result[0].min_zig_version).toBe(metadata.min_zig_version);
+			expect(Boolean(result[0].build_zig_exists)).toBe(
+				buildData.status === 200,
+			);
+			expect(Boolean(result[0].build_zig_zon_exists)).toBe(
+				zonData.status === 200,
+			);
+			expect(result[0].fetched_at).toBeGreaterThan(0);
+
+			// expect(result).toBeDefined();
+			// expect(result.repo_id).toBe(repoId);
+			// expect(result.min_zig_version).toBe(metadata.min_zig_version);
+			// expect(Boolean(result.build_zig_exists)).toBe(buildData.status === 200);
+			// expect(Boolean(result.build_zig_zon_exists)).toBe(zonData.status === 200);
+			// expect(result.fetched_at).toBeGreaterThan(0);
+			// let result = stmt.get(metadata.full_name);
+			// expect(result).toBeDefined();
+			// expect(result.full_name).toBe(metadata.full_name);
+			// expect(result.min_zig_version).toBe(metadata.min_zig_version);
+			// expect(Boolean(result.build_zig_exists)).toBe(buildData.status === 200);
+			// expect(Boolean(result.build_zig_zon_exists)).toBe(zonData.status === 200);
+			// expect(result.fetched_at).toBeGreaterThan(0);
+			//
+			// // Check upsert and ensure no duplication
+			// metadata = { ...metadata, fetched_at: metadata.fetched_at + 1 };
+			// upsertMetadata(db, [metadata]);
+			// result = stmt.get(metadata.full_name);
+			// expect(result).toBeDefined();
+			// expect(result.fetched_at).toBe(metadata.fetched_at);
+			//
+			// // Check for duplication
+			// const countStmt = db.prepare(
+			// 	`SELECT COUNT(*) as count FROM zig_repo_metadata WHERE full_name = ?`,
+			// );
+			// const countResult = countStmt.get(metadata.full_name);
+			// expect(countResult.count).toBe(1);
 		}
 	});
 
@@ -173,6 +268,7 @@ describe("Fetching and insertion", () => {
 	// 		expect(result.fetched_at).toBe(metadata.fetched_at);
 	// 	}
 	// });
+
 	//
 	// it("should process dependencies and insert to db", async () => {
 	// 	for (const repo of repos) {

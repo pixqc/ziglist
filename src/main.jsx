@@ -179,8 +179,7 @@ export const initDB = (conn) => {
 
 /**
  * @typedef {Object} RepoMetadata
- * @property {string} full_name
- * @property {string} platform
+ * @property {number} repo_id
  * @property {string|null} min_zig_version
  * @property {boolean} build_zig_exists
  * @property {boolean} build_zig_zon_exists
@@ -194,14 +193,13 @@ export const initDB = (conn) => {
 export const upsertMetadata = (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO zig_repo_metadata (
-			full_name,
-			platform,
+			repo_id,
 			min_zig_version,
 			build_zig_exists,
 			build_zig_zon_exists,
 			fetched_at
-		) VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(full_name, platform) DO UPDATE SET
+		) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(repo_id) DO UPDATE SET
 			min_zig_version = excluded.min_zig_version,
 			build_zig_exists = excluded.build_zig_exists,
 			build_zig_zon_exists = excluded.build_zig_zon_exists,
@@ -211,8 +209,7 @@ export const upsertMetadata = (conn, parsed) => {
 		const bulkUpdate = conn.transaction((data) => {
 			for (const row of data) {
 				stmt.run(
-					row.full_name,
-					row.platform,
+					row.repo_id,
 					row.min_zig_version ?? null,
 					row.build_zig_exists,
 					row.build_zig_zon_exists,
