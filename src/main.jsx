@@ -630,7 +630,7 @@ export const getTopRepoURL = (platform) => {
 		return `${base}?q=${encodeURIComponent(query)}&per_page=100&page=1`;
 	} else if (platform === "codeberg") {
 		const base = "https://codeberg.org/api/v1/repos/search";
-		const query = "language:zig";
+		const query = "zig";
 		return `${base}?q=${encodeURIComponent(query)}&includeDesc=true&page=1&limit=50`;
 	}
 	fatal(`getRepoURL - invalid platform ${platform}`);
