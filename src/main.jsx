@@ -6,6 +6,9 @@ import { appendFileSync } from "node:fs";
 // - are there more fields i need to add? just in case
 // - the github all url generator can be hardcoded, no need to addWeeks
 
+// ----------------------------------------------------------------------------
+// utils
+
 /**
  * @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel
  *
@@ -111,6 +114,169 @@ export const zon2json = (zon) => {
 		});
 };
 
+// ----------------------------------------------------------------------------
+// queries
+
+/**
+ * @param {Database} conn
+ * @returns {void}
+ */
+export const initDB = (conn) => {
+	conn.exec(`PRAGMA journal_mode = WAL;`);
+	conn.exec(`
+	CREATE TABLE IF NOT EXISTS zig_repos (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		full_name TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		name TEXT,
+		owner TEXT,
+		description TEXT NULL,
+		homepage TEXT NULL,
+		license TEXT NULL,
+		created_at INTEGER,
+		updated_at INTEGER,
+		pushed_at INTEGER,
+		stars INTEGER,
+		forks INTEGER,
+		is_fork BOOLEAN,
+		is_archived BOOLEAN,
+		default_branch TEXT,
+		language TEXT,
+		UNIQUE (platform, full_name)
+	);
+	CREATE TABLE IF NOT EXISTS zig_repo_metadata (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo_id INTEGER NOT NULL, 
+		min_zig_version TEXT,
+		build_zig_exists BOOLEAN NULL,
+		build_zig_zon_exists BOOLEAN NULL,
+		fetched_at INTEGER NULL,
+		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
+		ON DELETE CASCADE, 
+		UNIQUE(repo_id) 
+	);
+	CREATE TABLE IF NOT EXISTS url_dependencies (
+		hash TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		url TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
+		path TEXT,
+		url_dependency_hash TEXT,
+		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
+		ON DELETE CASCADE,
+		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
+		UNIQUE(repo_id, name, dependency_type, path),
+		UNIQUE(repo_id, name, dependency_type, url_dependency_hash)
+	);
+`);
+};
+
+/**
+ * @typedef {Object} RepoMetadata
+ * @property {string} full_name
+ * @property {string} platform
+ * @property {string|null} min_zig_version
+ * @property {boolean} build_zig_exists
+ * @property {boolean} build_zig_zon_exists
+ * @property {number} fetched_at
+ */
+
+/**
+ * @param {Database} conn
+ * @param {RepoMetadata[]} parsed
+ */
+export const upsertMetadata = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT INTO zig_repo_metadata (
+			full_name,
+			platform,
+			min_zig_version,
+			build_zig_exists,
+			build_zig_zon_exists,
+			fetched_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(full_name, platform) DO UPDATE SET
+			min_zig_version = excluded.min_zig_version,
+			build_zig_exists = excluded.build_zig_exists,
+			build_zig_zon_exists = excluded.build_zig_zon_exists,
+			fetched_at = excluded.fetched_at
+	`);
+	try {
+		const bulkUpdate = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(
+					row.full_name,
+					row.platform,
+					row.min_zig_version ?? null,
+					row.build_zig_exists,
+					row.build_zig_zon_exists,
+					row.fetched_at,
+				);
+			}
+		});
+		bulkUpdate(parsed);
+		logger.info(`db - upsertMetadata - len ${parsed.length}`);
+	} catch (e) {
+		logger.error(`db - upsertMetadata - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
+
+/**
+ * @param {Database} conn
+ * @param {z.infer<ReturnType<typeof getSchemaRepo>>[]} parsed
+ */
+export const upsertZigRepos = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT OR REPLACE INTO zig_repos (
+			platform, full_name, name, owner, description, homepage, license, 
+			created_at, updated_at, pushed_at, stars, forks, 
+			is_fork, is_archived, default_branch, language
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`);
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(row);
+			}
+		});
+		const rows = parsed.map((item) => [
+			item.platform,
+			item.full_name,
+			item.name,
+			item.owner,
+			item.description,
+			item.homepage,
+			item.license,
+			item.created_at,
+			item.updated_at,
+			item.pushed_at,
+			item.stars,
+			item.forks,
+			item.is_fork,
+			item.is_archived,
+			item.default_branch,
+			item.language,
+		]);
+		upsertMany(rows);
+		logger.info(`db - upsertZigRepos - len ${rows.length}`);
+	} catch (e) {
+		logger.error(`db - upsertZigRepos - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
+
+// ----------------------------------------------------------------------------
+// schemas
+
 const SchemaRepoBase = z.object({
 	name: z.string(),
 	full_name: z.string(),
@@ -127,16 +293,17 @@ const SchemaRepoBase = z.object({
 	stargazers_count: z.number().nullish(),
 	stars_count: z.number().nullish(),
 	pushed_at: z.string().nullish(),
+	archived: z.boolean(),
 });
 
 /**
  * @param {z.infer<typeof SchemaRepoBase>} data
- * @param {'github' | 'codeberg'} type
+ * @param {'github' | 'codeberg'} platform
  */
-const transformRepo = (data, type) => ({
+const transformRepo = (data, platform) => ({
+	platform,
 	name: data.name,
-	full_name:
-		type === "codeberg" ? `codeberg:${data.full_name}` : data.full_name,
+	full_name: data.full_name,
 	owner: data.owner.login,
 	description: data.description ?? null,
 	language: data.language ?? null,
@@ -149,7 +316,14 @@ const transformRepo = (data, type) => ({
 	license: data.license?.spdx_id ?? null,
 	homepage: data.homepage ?? null,
 	default_branch: data.default_branch,
+	is_archived: data.archived,
 });
+
+/**
+ * @param {'github' | 'codeberg'} platform
+ */
+export const getSchemaRepo = (platform) =>
+	SchemaRepoBase.transform((data) => transformRepo(data, platform));
 
 export const SchemaZon = z.object({
 	name: z.string(),
@@ -173,48 +347,42 @@ export const SchemaZon = z.object({
 		.optional(),
 });
 
-/**
- * @param {'github' | 'codeberg'} type
- */
-export const getSchemaRepo = (type) =>
-	SchemaRepoBase.transform((data) => transformRepo(data, type));
-
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
 const CODEBERG_API_KEY = process.env.CODEBERG_API_KEY;
 if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
 
 /**
- * @param {'github' | 'codeberg'} type
+ * @param {'github' | 'codeberg'} platform
  * @returns {HeadersInit}
  */
-export const getHeaders = (type) => {
-	if (type === "github") {
+export const getHeaders = (platform) => {
+	if (platform === "github") {
 		return {
 			Accept: "application/vnd.github+json",
 			"X-GitHub-Api-Version": "2022-11-28",
 			Authorization: `Bearer ${GITHUB_API_KEY}`,
 		};
-	} else if (type === "codeberg") {
+	} else if (platform === "codeberg") {
 		return {
 			Authorization: `token ${CODEBERG_API_KEY}`,
 		};
 	}
-	fatal(`getHeaders - invalid type ${type}`);
+	fatal(`getHeaders - invalid platform ${platform}`);
 	return {}; // unreachable
 };
 
 /**
  * @param {string} filename
- * @returns {(type: 'github' | 'codeberg', full_name: string, default_branch: string) => string}
+ * @returns {(platform: 'github' | 'codeberg', full_name: string, default_branch: string) => string}
  */
-const getMetadataURL = (filename) => (type, full_name, default_branch) => {
-	if (type === "github") {
+const getMetadataURL = (filename) => (platform, full_name, default_branch) => {
+	if (platform === "github") {
 		return `https://raw.githubusercontent.com/${full_name}/${default_branch}/${filename}`;
-	} else if (type === "codeberg") {
+	} else if (platform === "codeberg") {
 		return `https://codeberg.org/${full_name}/raw/branch/${default_branch}/${filename}`;
 	}
-	fatal(`getZigBuildURL - invalid type ${type}`);
+	fatal(`getZigBuildURL - invalid platform ${platform}`);
 	return ""; // unreachable
 };
 
@@ -238,157 +406,7 @@ export const fetchMetadata = async (url) => {
 	};
 };
 
-/**
- * @typedef {Object} RepoMetadata
- * @property {string} full_name
- * @property {string|null} min_zig_version
- * @property {boolean} build_zig_exists
- * @property {boolean} build_zig_zon_exists
- * @property {number} fetched_at
- */
-
-/**
- * @param {Database} conn
- * @param {RepoMetadata[]} parsed
- */
-export const upsertMetadata = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT INTO zig_repo_metadata (
-			full_name,
-			min_zig_version,
-			build_zig_exists,
-			build_zig_zon_exists,
-			fetched_at
-		) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(full_name) DO UPDATE SET
-			min_zig_version = excluded.min_zig_version,
-			build_zig_exists = excluded.build_zig_exists,
-			build_zig_zon_exists = excluded.build_zig_zon_exists,
-			fetched_at = excluded.fetched_at
-		`);
-
-	try {
-		const bulkUpdate = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(
-					row.full_name,
-					row.min_zig_version ?? null,
-					row.build_zig_exists,
-					row.build_zig_zon_exists,
-					row.fetched_at,
-				);
-			}
-		});
-		bulkUpdate(parsed);
-		logger.info(`db - upsertMetadata - len ${parsed.length}`);
-	} catch (e) {
-		logger.error(`db - upsertMetadata - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
-
-/**
- * @param {Database} conn
- * @returns {void}
- */
-export const initDB = (conn) => {
-	conn.exec(`PRAGMA journal_mode = WAL;`);
-	// using ${platform}:full_name as pk
-	// instead having "github/gitlab/codeberg" field
-	// because two repo, where one is mirrored, breaks constraint
-	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repos (
-		full_name TEXT PRIMARY KEY,
-		name TEXT,
-		owner TEXT,
-		description TEXT NULL,
-		homepage TEXT NULL,
-		license TEXT NULL,
-		created_at INTEGER,
-		updated_at INTEGER,
-		pushed_at INTEGER,
-		stars INTEGER,
-		forks INTEGER,
-		is_fork BOOLEAN,
-		default_branch TEXT,
-		language TEXT
-	);`);
-	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repo_metadata (
-		full_name TEXT PRIMARY KEY,
-		min_zig_version TEXT,
-		build_zig_exists BOOLEAN NULL,
-		build_zig_zon_exists BOOLEAN NULL,
-		fetched_at INTEGER NULL,
-		FOREIGN KEY (full_name) REFERENCES zig_repos(full_name)
-	);`);
-	conn.exec(`
-	CREATE TABLE IF NOT EXISTS url_dependencies (
-		hash TEXT PRIMARY KEY,
-		name TEXT NOT NULL,
-		url TEXT NOT NULL
-	);`);
-	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		full_name TEXT NOT NULL,
-		name TEXT NOT NULL,
-		dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
-		path TEXT,
-		url_dependency_hash TEXT,
-		FOREIGN KEY (full_name) REFERENCES zig_repos (full_name),
-		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
-		UNIQUE(full_name, name, dependency_type, path)
-		UNIQUE(full_name, name, dependency_type, url_dependency_hash)
-	);`);
-};
-
-/**
- * @param {Database} conn
- * @param {z.infer<ReturnType<typeof getSchemaRepo>>[]} parsed
- */
-export const upsertZigRepos = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT OR REPLACE INTO zig_repos (
-			full_name, name, owner, description, homepage, license, 
-			created_at, updated_at, pushed_at, stars, forks, 
-			is_fork, default_branch, language
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`);
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
-		const rows = parsed.map((item) => [
-			item.full_name,
-			item.name,
-			item.owner,
-			item.description,
-			item.homepage,
-			item.license,
-			item.created_at,
-			item.updated_at,
-			item.pushed_at,
-			item.stars,
-			item.forks,
-			item.is_fork,
-			item.default_branch,
-			item.language,
-		]);
-		upsertMany(rows);
-		logger.info(`db - upsertZigRepos - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`db - upsertZigRepos - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
-
-export const processDependencies = (parsed, full_name) => {
+export const processDependencies = (full_name, parsed) => {
 	const urlDeps = [];
 	const deps = [];
 
