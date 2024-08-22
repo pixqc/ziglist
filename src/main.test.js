@@ -88,25 +88,6 @@ const cacheMetadata = async (repo) => {
 	}
 };
 
-/**
- * @param {'github' | 'codeberg'} platform
- * @param {number} pages
- * @returns {Promise<void>}
- */
-const cacheTopRepos = async (platform, pages) => {
-	let url = getTopRepoURL(platform);
-	for (let i = 1; i <= pages; i++) {
-		const filename = `./.http-cache/${platform}-top-${i}.json`;
-		const file = Bun.file(filename);
-		if (file.size > 0) continue; // Skip if file exists
-		const response = await fetch(url, { headers: getHeaders(platform) });
-		const data = await response.json();
-		await Bun.write(file, JSON.stringify(data));
-		// @ts-ignore - wont be undefined
-		url = getNextURL(response);
-	}
-};
-
 describe("db inserts and reads", () => {
 	let db;
 	beforeAll(async () => {
@@ -356,19 +337,43 @@ describe("db inserts and reads", () => {
 	});
 });
 
+/**
+ * @param {'github' | 'codeberg'} platform
+ * @param {number} pages
+ * @returns {Promise<void>}
+ */
+const cacheTopRepos = async (platform, pages) => {
+	let url = getTopRepoURL(platform);
+	for (let i = 1; i <= pages; i++) {
+		const filename = `./.http-cache/${platform}-top-${i}.json`;
+		const file = Bun.file(filename);
+		if (file.size > 0) continue; // Skip if file exists
+		const response = await fetch(url, { headers: getHeaders(platform) });
+		const data = await response.json();
+		await Bun.write(file, JSON.stringify(data));
+		// @ts-ignore - wont be undefined
+		url = getNextURL(response);
+	}
+};
+
 describe("fetches", () => {
+	let db;
 	beforeAll(async () => {
 		await Promise.all([
 			cacheTopRepos("github", 2),
-			// cacheTopRepos("codeberg", 2),
+			cacheTopRepos("codeberg", 2),
 		]);
+
+		db = new Database(":memory:");
+		initDB(db);
 	});
 
-	it.only("should parse top repos", async () => {
+	it("should parse top github repos", async () => {
 		["1", "2"].forEach(async (page) => {
 			const filename = `./.http-cache/github-top-${page}.json`;
 			const file = Bun.file(filename);
 			const data = await file.json();
+			expect(data.items).toHaveLength(100);
 			const schema = getSchemaRepo("github");
 			for (const item of data.items) {
 				const tryParsed = schema.safeParse(item);
@@ -378,7 +383,27 @@ describe("fetches", () => {
 		});
 	});
 
+	it("should parse top codeberg repos", async () => {
+		["1", "2"].forEach(async (page) => {
+			const filename = `./.http-cache/codeberg-top-${page}.json`;
+			const file = Bun.file(filename);
+			const data = await file.json();
+			expect(data.data).toHaveLength(50);
+			const schema = getSchemaRepo("codeberg");
+			for (const item of data.data) {
+				const tryParsed = schema.safeParse(item);
+				if (!tryParsed.success) console.error(tryParsed.error);
+				expect(tryParsed.success).toBe(true);
+			}
+		});
+	});
+
 	it("should have a generator that loops", async () => {
 		// generate 100 times, make sure "2015-07-04" happens at least twice
+	});
+
+	afterAll(() => {
+		db.close();
+		logger.flush();
 	});
 });
