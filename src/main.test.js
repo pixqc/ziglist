@@ -1,4 +1,4 @@
-import { expect, describe, beforeAll, afterAll, it } from "bun:test";
+import { expect, describe, beforeAll, afterAll, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
 	getSchemaRepo,
@@ -101,7 +101,7 @@ describe("db inserts and reads", () => {
 		initDB(db);
 	});
 
-	it("should not insert duplicate repos", async () => {
+	test("should not insert duplicate repos", async () => {
 		for (const repo of repos) {
 			const platform = repo.platform;
 			const schema = getSchemaRepo(platform);
@@ -122,7 +122,7 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	it("should upsert repo properly", async () => {
+	test("should upsert repo properly", async () => {
 		for (const repo of repos) {
 			const platform = repo.platform;
 			const schema = getSchemaRepo(platform);
@@ -144,7 +144,7 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	it("should not insert duplicate metadata", async () => {
+	test("should not insert duplicate metadata", async () => {
 		for (const repo of repos) {
 			const zigFile = Bun.file(getCacheFilename("metadata-zig", repo));
 			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
@@ -190,7 +190,7 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	it("should upsert metadata properly", async () => {
+	test("should upsert metadata properly", async () => {
 		for (const repo of repos) {
 			const zigFile = Bun.file(getCacheFilename("metadata-zig", repo));
 			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
@@ -230,7 +230,7 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	it("should process and insert dependencies correctly", async () => {
+	test("should process and insert dependencies correctly", async () => {
 		for (const repo of repos) {
 			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
 			const zonData = await zonFile.json();
@@ -299,7 +299,7 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	it("should match deps parsed data with joined database entries", async () => {
+	test("should match deps parsed data with joined database entries", async () => {
 		for (const repo of repos) {
 			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
 			const zonData = await zonFile.json();
@@ -368,7 +368,7 @@ describe("fetches", () => {
 		initDB(db);
 	});
 
-	it("should parse top github repos", async () => {
+	test("should parse top github repos", async () => {
 		["1", "2"].forEach(async (page) => {
 			const filename = `./.http-cache/github-top-${page}.json`;
 			const file = Bun.file(filename);
@@ -383,7 +383,7 @@ describe("fetches", () => {
 		});
 	});
 
-	it("should parse top codeberg repos", async () => {
+	test("should parse top codeberg repos", async () => {
 		["1", "2"].forEach(async (page) => {
 			const filename = `./.http-cache/codeberg-top-${page}.json`;
 			const file = Bun.file(filename);
@@ -398,7 +398,7 @@ describe("fetches", () => {
 		});
 	});
 
-	it("should have a generator that loops", async () => {
+	test("should have a generator that loops", async () => {
 		// generate 100 times, make sure "2015-07-04" happens at least twice
 	});
 
