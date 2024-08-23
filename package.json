@@ -16,5 +16,8 @@
     "dev:init": "bun run dev:tailwind && bun run dev:restore",
     "dev": "bun run dev:tailwind --watch & bun run dev:main"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "hono": "^4.5.8"
+  }
 }
