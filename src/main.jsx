@@ -46,8 +46,8 @@ export const createLogger = () => {
 			message,
 			data,
 		};
-		// if (level === "error") console.error(JSON.stringify(logEntry));
-		// else console.log(JSON.stringify(logEntry));
+		if (level === "error") console.error(JSON.stringify(logEntry));
+		else console.log(JSON.stringify(logEntry));
 		buffer.push(JSON.stringify(logEntry));
 	};
 
@@ -478,6 +478,27 @@ export const upsertDependencies = (conn, parsed, repo_id) => {
 		logger.error(`db - upsertDependencies - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
+	}
+};
+
+export const rebuildFts = () => {
+	try {
+		db.exec(`DROP TABLE IF EXISTS repos_fts;`);
+		db.exec(`
+			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
+				owner, 
+				name,
+				full_name,
+				description
+			);`);
+		db.exec(`
+			INSERT INTO repos_fts(owner, name, full_name, description)
+				SELECT owner, name, full_name, description
+				FROM repos;
+		`);
+		logger.info("db - rebuildFts");
+	} catch (e) {
+		logger.error(`db - rebuildFts - ${e}`);
 	}
 };
 
@@ -1144,7 +1165,9 @@ app.use("*", async (c, next) => {
 	const start = Date.now();
 	await next();
 	const ms = Date.now() - start;
-	logger.info(`${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`);
+	logger.info(
+		`server.${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`,
+	);
 });
 
 app.get("/", (c) => {
@@ -1170,7 +1193,7 @@ app.get("/", (c) => {
 	`);
 
 	const repos = stmt.all(perPage, offset);
-	logger.info(`server.get /?page=${page} - ${repos.length} from db`);
+	logger.info(`server.GET /?page=${page} - ${repos.length} from db`);
 
 	return c.html(
 		<BaseLayout>
@@ -1210,7 +1233,7 @@ app.get("/new", (c) => {
 	`);
 
 	const repos = stmt.all(perPage, offset);
-	logger.info(`server.get /new?page=${page} - ${repos.length} from db`);
+	logger.info(`server.GET /new?page=${page} - ${repos.length} from db`);
 
 	return c.html(
 		<BaseLayout>
@@ -1251,7 +1274,7 @@ app.get("/top", (c) => {
 	`);
 
 	const repos = stmt.all(perPage, offset);
-	logger.info(`server.get /top?page=${page} - ${repos.length} from db`);
+	logger.info(`server.GET /top?page=${page} - ${repos.length} from db`);
 
 	return c.html(
 		<BaseLayout>
@@ -1269,15 +1292,68 @@ app.get("/top", (c) => {
 	);
 });
 
+app.get("/search", (c) => {
+	const page = parseInt(c.req.query("page") || "1", 10);
+	const perPage = page === 1 ? 29 : 30;
+	const offset = (page - 1) * perPage;
+	const rawQuery = c.req.query("q") || "";
+	const query = rawQuery.replace(/[-_]/g, " ");
+
+	if (query.trim() === "") return c.redirect("/");
+	const stmt = db.prepare(`
+		SELECT 
+			r.*,
+			rm.min_zig_version,
+			rm.build_zig_exists,
+			rm.build_zig_zon_exists,
+			GROUP_CONCAT(rd.name) AS dependencies
+		FROM repos_fts fts
+		JOIN repos r ON fts.full_name = r.full_name
+		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
+		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+		WHERE repos_fts MATCH ?
+			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+		GROUP BY r.id
+		ORDER BY r.stars DESC
+		LIMIT ? OFFSET ?
+	`);
+
+	const repos = stmt.all(query, perPage, offset);
+	logger.info(
+		`server.GET /search?page=${page} - query: ${rawQuery} - ${repos.length} from db`,
+	);
+
+	return c.html(
+		<BaseLayout>
+			<Header />
+			<Hero />
+			<Navigation currentPath={"/search"} query={rawQuery} />
+			<div className="max-w-5xl mx-auto px-3 py-6">
+				<RepoGrid
+					repos={Object.values(repos)}
+					currentPath="/search"
+					page={page}
+				/>
+			</div>
+			{page > 0 && (
+				<Pagination page={page} currentPath={"/search"} query={rawQuery} />
+			)}
+			<Footer />
+		</BaseLayout>,
+	);
+});
+
 export default {
 	port: 8080,
 	fetch: app.fetch,
 };
 
-const db = new Database(":memory:");
+const db = new Database("a.sqlite");
 initDB(db);
 const filename = `./.http-cache/github-top-1.json`;
 const file = Bun.file(filename);
 const data = await file.json();
 const parsed = data.items.map(repoExtractors["github"]);
 upsertZigRepos(db, parsed);
+rebuildFts();
