@@ -1159,6 +1159,15 @@ const Header = () => (
 	</header>
 );
 
+const NoItems = () => (
+	<div className="max-w-5xl mx-auto px-3 py-56 flex flex-col items-center space-y-4">
+		<LucideCircleOff />
+		<p className="text-sm text-stone-400 dark:text-stone-500">
+			No results found.
+		</p>
+	</div>
+);
+
 const app = new Hono();
 
 app.use("*", async (c, next) => {
@@ -1194,6 +1203,18 @@ app.get("/", (c) => {
 
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /?page=${page} - ${repos.length} from db`);
+
+	if (repos.length === 0) {
+		return c.html(
+			<BaseLayout>
+				<Header />
+				<Hero />
+				<Navigation currentPath={"/"} query={undefined} />
+				<NoItems />
+				<Footer />
+			</BaseLayout>,
+		);
+	}
 
 	return c.html(
 		<BaseLayout>
@@ -1235,6 +1256,18 @@ app.get("/new", (c) => {
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /new?page=${page} - ${repos.length} from db`);
 
+	if (repos.length === 0) {
+		return c.html(
+			<BaseLayout>
+				<Header />
+				<Hero />
+				<Navigation currentPath={"/new"} query={undefined} />
+				<NoItems />
+				<Footer />
+			</BaseLayout>,
+		);
+	}
+
 	return c.html(
 		<BaseLayout>
 			<Header />
@@ -1275,6 +1308,18 @@ app.get("/top", (c) => {
 
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /top?page=${page} - ${repos.length} from db`);
+
+	if (repos.length === 0) {
+		return c.html(
+			<BaseLayout>
+				<Header />
+				<Hero />
+				<Navigation currentPath={"/top"} query={undefined} />
+				<NoItems />
+				<Footer />
+			</BaseLayout>,
+		);
+	}
 
 	return c.html(
 		<BaseLayout>
@@ -1323,6 +1368,18 @@ app.get("/search", (c) => {
 	logger.info(
 		`server.GET /search?page=${page} - query: ${rawQuery} - ${repos.length} from db`,
 	);
+
+	if (repos.length === 0) {
+		return c.html(
+			<BaseLayout>
+				<Header />
+				<Hero />
+				<Navigation currentPath={"/search"} query={rawQuery} />
+				<NoItems />
+				<Footer />
+			</BaseLayout>,
+		);
+	}
 
 	return c.html(
 		<BaseLayout>
