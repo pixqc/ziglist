@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { Database } from "bun:sqlite";
 import { appendFileSync } from "node:fs";
 
@@ -6,7 +5,7 @@ import { appendFileSync } from "node:fs";
 // - are there more fields i need to add? just in case
 // - the github all url generator can be hardcoded, no need to addWeeks
 
-/** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
+/** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} RepoName */
 /** @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel */
 
 // ----------------------------------------------------------------------------
@@ -213,10 +212,10 @@ export const getNextURL = (response) => {
 // ----------------------------------------------------------------------------
 // queries
 
-// snake case and null because to keep consistency with db
+// snake case and null to keep consistency with db
 
 /**
- * @typedef {Object} ZigRepo
+ * @typedef {Object} Repo
  * @property {number} id
  * @property {string} full_name
  * @property {string} platform
@@ -237,13 +236,36 @@ export const getNextURL = (response) => {
  */
 
 /**
+ * @typedef {Object} RepoMetadata
+ * @property {number} repo_id
+ * @property {string | null} min_zig_version
+ * @property {boolean} build_zig_exists
+ * @property {boolean} build_zig_zon_exists
+ * @property {number} fetched_at
+ */
+
+/** @typedef {Object} RepoDependency
+ * @property {string} full_name
+ * @property {string} name
+ * @property {string} dependency_type
+ * @property {string | null} path
+ * @property {string | null} url_dependency_hash
+ */
+
+/** @typedef {Object} UrlDependency
+ * @property {string} hash
+ * @property {string} name
+ * @property {string} url
+ */
+
+/**
  * @param {Database} conn
  * @returns {void}
  */
 export const initDB = (conn) => {
 	conn.exec(`PRAGMA journal_mode = WAL;`);
 	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repos (
+	CREATE TABLE IF NOT EXISTS repos (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		full_name TEXT NOT NULL,
 		platform TEXT NOT NULL,
@@ -264,14 +286,14 @@ export const initDB = (conn) => {
 		UNIQUE (platform, full_name)
 	);`);
 	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repo_metadata (
+	CREATE TABLE IF NOT EXISTS repo_metadata (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo_id INTEGER NOT NULL, 
 		min_zig_version TEXT,
 		build_zig_exists BOOLEAN NULL,
 		build_zig_zon_exists BOOLEAN NULL,
 		fetched_at INTEGER NULL,
-		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
+		FOREIGN KEY (repo_id) REFERENCES repos(id) 
 			ON DELETE CASCADE, 
 		UNIQUE(repo_id) 
 	);`);
@@ -282,14 +304,14 @@ export const initDB = (conn) => {
 		url TEXT NOT NULL
 	);`);
 	conn.exec(`
-	CREATE TABLE IF NOT EXISTS zig_repo_dependencies (
+	CREATE TABLE IF NOT EXISTS repo_dependencies (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		repo_id INTEGER NOT NULL,
 		name TEXT NOT NULL,
 		dependency_type TEXT CHECK(dependency_type IN ('url', 'path')) NOT NULL,
 		path TEXT,
 		url_dependency_hash TEXT,
-		FOREIGN KEY (repo_id) REFERENCES zig_repos(id) 
+		FOREIGN KEY (repo_id) REFERENCES repos(id) 
 				ON DELETE CASCADE,
 		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
 		UNIQUE(repo_id, name, dependency_type, path),
@@ -298,61 +320,12 @@ export const initDB = (conn) => {
 };
 
 /**
- * @typedef {Object} RepoMetadata
- * @property {number} repo_id
- * @property {string|null} min_zig_version
- * @property {boolean} build_zig_exists
- * @property {boolean} build_zig_zon_exists
- * @property {number} fetched_at
- */
-
-/**
  * @param {Database} conn
- * @param {RepoMetadata[]} parsed
- */
-export const upsertMetadata = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT INTO zig_repo_metadata (
-			repo_id,
-			min_zig_version,
-			build_zig_exists,
-			build_zig_zon_exists,
-			fetched_at
-		) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(repo_id) DO UPDATE SET
-			min_zig_version = excluded.min_zig_version,
-			build_zig_exists = excluded.build_zig_exists,
-			build_zig_zon_exists = excluded.build_zig_zon_exists,
-			fetched_at = excluded.fetched_at
-	`);
-	try {
-		const bulkUpdate = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(
-					row.repo_id,
-					row.min_zig_version,
-					row.build_zig_exists,
-					row.build_zig_zon_exists,
-					row.fetched_at,
-				);
-			}
-		});
-		bulkUpdate(parsed);
-		logger.info(`db - upsertMetadata - len ${parsed.length}`);
-	} catch (e) {
-		logger.error(`db - upsertMetadata - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
-
-/**
- * @param {Database} conn
- * @param {ZigRepo[]} parsed
+ * @param {Repo[]} parsed
  */
 export const upsertZigRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
-		INSERT INTO zig_repos (
+		INSERT INTO repos (
 			platform, full_name, name, owner, description, homepage, license, 
 			created_at, updated_at, pushed_at, stars, forks, 
 			is_fork, is_archived, default_branch, language
@@ -410,11 +383,45 @@ export const upsertZigRepos = (conn, parsed) => {
 	}
 };
 
-/** @typedef {Object} UrlDependency
- * @property {string} hash
- * @property {string} name
- * @property {string} url
+/**
+ * @param {Database} conn
+ * @param {RepoMetadata[]} parsed
  */
+export const upsertMetadata = (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT INTO repo_metadata (
+			repo_id,
+			min_zig_version,
+			build_zig_exists,
+			build_zig_zon_exists,
+			fetched_at
+		) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(repo_id) DO UPDATE SET
+			min_zig_version = excluded.min_zig_version,
+			build_zig_exists = excluded.build_zig_exists,
+			build_zig_zon_exists = excluded.build_zig_zon_exists,
+			fetched_at = excluded.fetched_at
+	`);
+	try {
+		const bulkUpdate = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(
+					row.repo_id,
+					row.min_zig_version,
+					row.build_zig_exists,
+					row.build_zig_zon_exists,
+					row.fetched_at,
+				);
+			}
+		});
+		bulkUpdate(parsed);
+		logger.info(`db - upsertMetadata - len ${parsed.length}`);
+	} catch (e) {
+		logger.error(`db - upsertMetadata - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
+};
 
 /**
  * @param {Database} conn
@@ -440,22 +447,14 @@ export const insertUrlDependencies = (conn, parsed) => {
 	}
 };
 
-/** @typedef {Object} ZigRepoDependency
- * @property {string} full_name
- * @property {string} name
- * @property {string} dependency_type
- * @property {string|null} path
- * @property {string|null} url_dependency_hash
- */
-
 /**
  * @param {Database} conn
- * @param {ZigRepoDependency[]} parsed
+ * @param {RepoDependency[]} parsed
  * @param {number} repo_id
  */
 export const upsertDependencies = (conn, parsed, repo_id) => {
 	const stmt = conn.prepare(`
-		INSERT INTO zig_repo_dependencies (
+		INSERT INTO repo_dependencies (
 			repo_id, name, dependency_type, path, url_dependency_hash
 		) VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT (repo_id, name, dependency_type, path) 
@@ -490,7 +489,7 @@ export const upsertDependencies = (conn, parsed, repo_id) => {
 
 /**
  * @param {any} data
- * @returns {ZigRepo} The extracted GitHub repo data.
+ * @returns {Repo}
  */
 const extractGithub = (data) => ({
 	id: data.id,
@@ -512,6 +511,10 @@ const extractGithub = (data) => ({
 	is_archived: data.archived,
 });
 
+/**
+ * @param {any} data
+ * @returns {Repo}
+ */
 const extractCodeberg = (data) => ({
 	id: data.id,
 	full_name: data.full_name,
@@ -537,72 +540,9 @@ export const repoExtractors = {
 	codeberg: extractCodeberg,
 };
 
-// ----------------------------------------------------------------------------
-// schemas
-
-const SchemaRepoBase = z.object({
-	name: z.string(),
-	full_name: z.string(),
-	owner: z.object({ login: z.string() }),
-	description: z.string().nullish(),
-	language: z.string().nullish(),
-	fork: z.boolean(),
-	forks_count: z.number(),
-	created_at: z.string(),
-	updated_at: z.string(),
-	license: z.object({ spdx_id: z.string() }).nullish(),
-	homepage: z.string().nullish(),
-	default_branch: z.string(),
-	stargazers_count: z.number().nullish(),
-	stars_count: z.number().nullish(),
-	pushed_at: z.string().nullish(),
-	archived: z.boolean(),
-});
-
 /**
- * @param {z.infer<typeof SchemaRepoBase>} data
- * @param {'github' | 'codeberg'} platform
- */
-const transformRepo = (data, platform) => ({
-	platform,
-	name: data.name,
-	full_name: data.full_name,
-	owner: data.owner.login,
-	description: data.description ?? null,
-	language: data.language ?? null,
-	is_fork: data.fork,
-	forks: data.forks_count,
-	stars: data.stargazers_count ?? data.stars_count ?? 0,
-	created_at: dateToUnix(data.created_at),
-	updated_at: dateToUnix(data.updated_at),
-	pushed_at: dateToUnix(data.pushed_at ?? data.updated_at),
-	license: data.license?.spdx_id ?? null,
-	homepage: data.homepage ?? null,
-	default_branch: data.default_branch,
-	is_archived: data.archived,
-});
-
-/**
- * @param {'github' | 'codeberg'} platform
- */
-export const getSchemaRepo = (platform) =>
-	SchemaRepoBase.transform((data) => transformRepo(data, platform));
-
-const SchemaZonDependency = z.union([
-	z.object({
-		url: z.string(),
-		hash: z.string(),
-		lazy: z.boolean().optional(),
-	}),
-	z.object({
-		path: z.string(),
-		lazy: z.boolean().optional(),
-	}),
-]);
-const SchemaZonDependencies = z.record(SchemaZonDependency);
-
-/**
- * @param {z.infer<typeof SchemaZonDependencies>} dependencies
+ * @param {Object.<string, any>} dependencies
+ * @returns {{urlDeps: UrlDependency[], deps: RepoDependency[]}}
  */
 const transformDependencies = (dependencies) => {
 	const urlDeps = [];
@@ -632,54 +572,66 @@ const transformDependencies = (dependencies) => {
 	return { urlDeps, deps };
 };
 
-export const SchemaZon = z
-	.object({
-		name: z.string(),
-		version: z.string(),
-		minimum_zig_version: z.string().optional(),
-		paths: z.array(z.string()).optional(),
-		dependencies: SchemaZonDependencies.optional(),
-	})
-	.transform((data) => {
-		const { dependencies, ...rest } = data;
-		const { urlDeps, deps } = dependencies
-			? transformDependencies(dependencies)
-			: { urlDeps: [], deps: [] };
-		return {
-			...rest,
-			urlDeps,
-			deps,
-		};
-	});
+/**
+ * @param {Object} data - return of JSON.parse(zon2json(zon))
+ * @param {string} data.name
+ * @param {string} data.version
+ * @param {string | null} [data.minimum_zig_version]
+ * @param {string[]} data.paths
+ * @param {Object.<string, any>} [data.dependencies]
+ * @returns {{
+ *   name: string,
+ *   version: string,
+ *   minimum_zig_version: string | null,
+ *   paths: string[],
+ *   urlDeps: UrlDependency[],
+ *   deps: RepoDependency[]
+ * }}
+ */
+export const extractZon = (data) => {
+	const name = data.name;
+	const version = data.version;
+	const minimum_zig_version = data.minimum_zig_version ?? null;
+	const paths = data.paths;
+
+	let urlDeps = [];
+	let deps = [];
+
+	if (data.dependencies) {
+		const transformedDependencies = transformDependencies(data.dependencies);
+		urlDeps = transformedDependencies.urlDeps;
+		deps = transformedDependencies.deps;
+	}
+
+	return {
+		name: name,
+		version: version,
+		minimum_zig_version: minimum_zig_version,
+		paths: paths,
+		urlDeps: urlDeps,
+		deps: deps,
+	};
+};
 
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
 if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
 const CODEBERG_API_KEY = process.env.CODEBERG_API_KEY;
 if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
 
-/**
- * @param {'github' | 'codeberg'} platform
- * @returns {HeadersInit}
- */
-export const getHeaders = (platform) => {
-	if (platform === "github") {
-		return {
-			Accept: "application/vnd.github+json",
-			"X-GitHub-Api-Version": "2022-11-28",
-			Authorization: `Bearer ${GITHUB_API_KEY}`,
-		};
-	} else if (platform === "codeberg") {
-		return {
-			Authorization: `token ${CODEBERG_API_KEY}`,
-		};
-	}
-	fatal(`getHeaders - invalid platform ${platform}`);
-	return {}; // unreachable
+export const headers = {
+	github: {
+		Accept: "application/vnd.github+json",
+		"X-GitHub-Api-Version": "2022-11-28",
+		Authorization: `Bearer ${GITHUB_API_KEY}`,
+	},
+	codeberg: {
+		Authorization: `token ${CODEBERG_API_KEY}`,
+	},
 };
 
 /**
  * @param {string} filename
- * @returns {(repo: Repo) => string}
+ * @returns {(repo: RepoName) => string}
  */
 const getMetadataURL = (filename) => (repo) => {
 	if (repo.platform === "github") {
@@ -714,7 +666,7 @@ export const getTopRepoURL = (platform) => {
 
 /**
  * the date range is used to fetch all repos from github, it's hardcoded
- * to make sure the query returns <1k items per
+ * to make sure the query returns <1k items per url
  */
 const createDateGenerator = () => {
 	// first index: zig init date,
