@@ -1170,8 +1170,8 @@ app.get("/", (c) => {
 	`);
 
 	const repos = stmt.all(perPage, offset);
-
 	logger.info(`server.get /?page=${page} - ${repos.length} from db`);
+
 	return c.html(
 		<BaseLayout>
 			<Header />
@@ -1188,6 +1188,87 @@ app.get("/", (c) => {
 	);
 });
 
+app.get("/new", (c) => {
+	const page = parseInt(c.req.query("page") || "1", 10);
+	const perPage = page === 1 ? 29 : 30;
+	const offset = (page - 1) * perPage;
+	const stmt = db.prepare(`
+		SELECT 
+			r.*,
+			rm.min_zig_version,
+			rm.build_zig_exists,
+			rm.build_zig_zon_exists,
+			GROUP_CONCAT(rd.name) AS dependencies
+		FROM repos r
+		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
+		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+		WHERE r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+		GROUP BY r.id
+		ORDER BY r.created_at DESC
+		LIMIT ? OFFSET ?
+	`);
+
+	const repos = stmt.all(perPage, offset);
+	logger.info(`server.get /new?page=${page} - ${repos.length} from db`);
+
+	return c.html(
+		<BaseLayout>
+			<Header />
+			<Hero />
+			<Navigation currentPath={"/new"} query={undefined} />
+			<div className="max-w-5xl mx-auto px-3 py-6">
+				<RepoGrid repos={Object.values(repos)} currentPath="/new" page={page} />
+			</div>
+			{page > 0 && (
+				<Pagination page={page} currentPath={"/new"} query={undefined} />
+			)}
+			<Footer />
+		</BaseLayout>,
+	);
+});
+
+app.get("/top", (c) => {
+	const page = parseInt(c.req.query("page") || "1", 10);
+	const perPage = page === 1 ? 29 : 30;
+	const offset = (page - 1) * perPage;
+	const stmt = db.prepare(`
+		SELECT 
+			r.*,
+			rm.min_zig_version,
+			rm.build_zig_exists,
+			rm.build_zig_zon_exists,
+			GROUP_CONCAT(rd.name) AS dependencies
+		FROM repos r
+		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
+		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+		WHERE r.forks >= 10
+			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+		GROUP BY r.id
+		ORDER BY r.stars DESC
+		LIMIT ? OFFSET ?
+	`);
+
+	const repos = stmt.all(perPage, offset);
+	logger.info(`server.get /top?page=${page} - ${repos.length} from db`);
+
+	return c.html(
+		<BaseLayout>
+			<Header />
+			<Hero />
+			<Navigation currentPath={"/top"} query={undefined} />
+			<div className="max-w-5xl mx-auto px-3 py-6">
+				<RepoGrid repos={Object.values(repos)} currentPath="/top" page={page} />
+			</div>
+			{page > 0 && (
+				<Pagination page={page} currentPath={"/top"} query={undefined} />
+			)}
+			<Footer />
+		</BaseLayout>,
+	);
+});
+
 export default {
 	port: 8080,
 	fetch: app.fetch,
@@ -1195,8 +1276,8 @@ export default {
 
 const db = new Database(":memory:");
 initDB(db);
-const filename = `./.http-cache/codeberg-top-1.json`;
+const filename = `./.http-cache/github-top-1.json`;
 const file = Bun.file(filename);
 const data = await file.json();
-const parsed = data.data.map(repoExtractors["codeberg"]);
+const parsed = data.items.map(repoExtractors["github"]);
 upsertZigRepos(db, parsed);
