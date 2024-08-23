@@ -1,3 +1,4 @@
+import { Hono } from "hono";
 import { Database } from "bun:sqlite";
 import { appendFileSync } from "node:fs";
 
@@ -609,21 +610,8 @@ export const extractZon = (data) => {
 	};
 };
 
-const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
-if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
-const CODEBERG_API_KEY = process.env.CODEBERG_API_KEY;
-if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
-
-export const headers = {
-	github: {
-		Accept: "application/vnd.github+json",
-		"X-GitHub-Api-Version": "2022-11-28",
-		Authorization: `Bearer ${GITHUB_API_KEY}`,
-	},
-	codeberg: {
-		Authorization: `token ${CODEBERG_API_KEY}`,
-	},
-};
+// ----------------------------------------------------------------------------
+// url stuffs
 
 /**
  * @param {string} filename
@@ -731,3 +719,210 @@ export const getAllRepoURL = (platform) => {
 	fatal(`getRepoURL - invalid platform ${platform}`);
 	return ""; // unreachable
 };
+
+const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
+if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+const CODEBERG_API_KEY = process.env.CODEBERG_API_KEY;
+if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
+
+export const headers = {
+	github: {
+		Accept: "application/vnd.github+json",
+		"X-GitHub-Api-Version": "2022-11-28",
+		Authorization: `Bearer ${GITHUB_API_KEY}`,
+	},
+	codeberg: {
+		Authorization: `token ${CODEBERG_API_KEY}`,
+	},
+};
+
+// ----------------------------------------------------------------------------
+// jsx components
+// note: this is not a React application, jsx is only for templating
+
+const RepoDetail = ({ kind, value }) => (
+	<div className="flex">
+		<span className="text-sm text-stone-500 dark:text-stone-400">{kind}</span>
+		<div className="grow flex flex-col px-3">
+			<div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
+			<div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
+		</div>
+		<span className="text-sm text-stone-500 dark:text-stone-400">{value}</span>
+	</div>
+);
+
+const SpecialCard = () => {
+	return (
+		<div className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block">
+			<h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1">
+				More features coming soon!
+			</h3>
+			<p className="text-sm text-stone-700 dark:text-stone-300 mb-2">
+				GitLab support, zigmod+gyro support, dependency graph, etc. Feature
+				requests? Missing dependencies in one of the pkgs/projects? Let me know!
+			</p>
+			<div className="grow" />
+			<a
+				href="https://github.com/pixqc/ziglist/issues"
+				target="_blank"
+				rel="noopener noreferrer"
+				className="inline-block w-full text-center text-sm py-1.5 bg-[#eeedec] dark:bg-[#363230] text-stone-800 dark:text-stone-200 rounded-md hover:bg-stone-300 dark:hover:bg-stone-600 transition-colors"
+			>
+				GitHub Issues
+			</a>
+		</div>
+	);
+};
+
+const RepoCard = ({ repo }) => {
+	const shownDeps = 5;
+
+	const repoUrl =
+		repo.platform === "github"
+			? `https://github.com/${repo.full_name}`
+			: `https://codeberg.org/${repo.full_name}`;
+
+	return (
+		<a
+			href={repoUrl}
+			target="_blank"
+			rel="noopener noreferrer"
+			className="bg-stone-50 dark:bg-stone-800 p-3 border border-stone-200 dark:border-stone-700 rounded-md flex flex-col block hover:bg-stone-100 dark:hover:bg-stone-900 transition-colors"
+		>
+			<h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-1 hover:underline break-words">
+				{repo.full_name}
+			</h3>
+			{repo.description && (
+				<p className="text-sm text-stone-700 dark:text-stone-300 mb-2 break-words">
+					{repo.description.length > 120
+						? repo.description.slice(0, 120) + "..."
+						: repo.description}
+				</p>
+			)}
+			<div className="grow" />
+			<div className="flex flex-wrap gap-1 mb-1">
+				{repo.build_zig_exists === 1 && <Badge value={"build.zig ✓"} />}
+				{repo.build_zig_zon_exists === 1 && <Badge value={"zon ✓"} />}
+				{repo.is_fork === 1 && <Badge value={"fork:true"} />}
+				{repo.build_zig_exists === 1 &&
+					repo.language !== "Zig" &&
+					repo.language !== null && <Badge value={`lang:${repo.language}`} />}
+				{repo.platform === "codeberg" && <Badge value={"codeberg"} />}
+			</div>
+			{repo.dependencies && repo.dependencies.length > 0 && (
+				<div className="flex flex-wrap gap-1 items-center">
+					<span className="text-sm text-stone-500 dark:text-stone-400">
+						Deps:
+					</span>
+					{repo.dependencies.slice(0, shownDeps).map((dep) => (
+						<Badge value={dep} />
+					))}
+					{repo.dependencies.length > shownDeps && (
+						<span className="flex text-sm text-stone-500 dark:text-stone-400 grow">
+							<div className="grow flex flex-col pr-3">
+								<div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
+								<div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
+							</div>
+							+{repo.dependencies.length - shownDeps} more deps
+						</span>
+					)}
+				</div>
+			)}
+			{repo.min_zig_version && (
+				<RepoDetail kind="Min Zig" value={repo.min_zig_version.split("+")[0]} />
+			)}
+			<RepoDetail kind="Stars" value={formatNumberK(repo.stars)} />
+			<RepoDetail kind="Last commit" value={timeAgo(repo.pushed_at)} />
+		</a>
+	);
+};
+
+const RepoGrid = ({ repos, page, currentPath }) => {
+	const repoElements = repos.map((repo) => <RepoCard repo={repo} />);
+	if (currentPath === "/" && page === 1) {
+		repoElements.splice(2, 0, <SpecialCard key="special" />);
+	}
+	return (
+		<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+			{repoElements}
+		</div>
+	);
+};
+
+const tailwindcss = await Bun.file("./assets/tailwind.css").text();
+const BaseLayout = ({ children }) => (
+	<html lang="en" className="dark">
+		<head>
+			<meta charSet="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			<title>ziglist.org</title>
+			<style dangerouslySetInnerHTML={{ __html: tailwindcss }} />
+		</head>
+		<body className="bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100">
+			{children}
+		</body>
+	</html>
+);
+
+const app = new Hono();
+
+app.use("*", async (c, next) => {
+	const start = Date.now();
+	await next();
+	const ms = Date.now() - start;
+	logger.info(`${c.req.method} ${c.req.url} - ${c.res.status} - ${ms}ms`);
+});
+
+app.get("/", (c) => {
+	const page = parseInt(c.req.query("page") || "1", 10);
+	const perPage = page === 1 ? 29 : 30;
+	const offset = (page - 1) * perPage;
+	const stmt = db.prepare(`
+		SELECT 
+			r.full_name,
+			r.platform,
+			r.description,
+			r.language,
+			r.stars,
+			r.forks,
+			r.is_fork,
+			r.pushed_at,
+			rm.min_zig_version,
+			rm.build_zig_exists,
+			rm.build_zig_zon_exists,
+			GROUP_CONCAT(rd.name) AS dependencies
+		FROM repos r
+		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
+		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+		WHERE r.stars >= 10 AND r.forks >= 10
+			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+		GROUP BY r.id
+		ORDER BY r.pushed_at DESC
+		LIMIT ? OFFSET ?
+	`);
+
+	const repos = stmt.all(perPage, offset);
+
+	logger.info(`server.get /?page=${page} - ${repos.length} from db`);
+	return c.html(
+		<BaseLayout>
+			<div className="max-w-5xl mx-auto px-3 py-6">
+				<RepoGrid repos={Object.values(repos)} currentPath="/" page={page} />
+			</div>
+		</BaseLayout>,
+	);
+});
+
+export default {
+	port: 8080,
+	fetch: app.fetch,
+};
+
+const db = new Database("db.sqlite");
+initDB(db);
+const filename = `./.http-cache/github-top-1.json`;
+const file = Bun.file(filename);
+const data = await file.json();
+const parsed = data.items.map(repoExtractors["github"]);
+upsertZigRepos(db, parsed);
