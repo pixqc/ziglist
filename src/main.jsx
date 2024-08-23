@@ -1,15 +1,11 @@
 import { Database } from "bun:sqlite";
 import { appendFileSync } from "node:fs";
 
-// TODO:
-// - are there more fields i need to add? just in case
-// - the github all url generator can be hardcoded, no need to addWeeks
+// ----------------------------------------------------------------------------
+// utils
 
 /** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} RepoName */
 /** @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel */
-
-// ----------------------------------------------------------------------------
-// utils
 
 /**
  * @returns {{
@@ -505,7 +501,7 @@ const extractGithub = (data) => ({
 	homepage: data.homepage ?? null,
 	license: data.license?.spdx_id ?? null,
 	language: data.language ?? null,
-	stars: data.stargazers_count ?? 0,
+	stars: data.stargazers_count,
 	forks: data.forks_count,
 	is_fork: data.fork,
 	is_archived: data.archived,
@@ -529,7 +525,7 @@ const extractCodeberg = (data) => ({
 	homepage: data.homepage ?? null,
 	license: data.license?.spdx_id ?? null,
 	language: data.language ?? null,
-	stars: data.stars_count ?? 0,
+	stars: data.stars_count,
 	forks: data.forks_count,
 	is_fork: data.fork,
 	is_archived: data.archived,
@@ -576,7 +572,7 @@ const transformDependencies = (dependencies) => {
  * @param {Object} data - return of JSON.parse(zon2json(zon))
  * @param {string} data.name
  * @param {string} data.version
- * @param {string | null} [data.minimum_zig_version]
+ * @param {string | undefined} data.minimum_zig_version
  * @param {string[]} data.paths
  * @param {Object.<string, any>} [data.dependencies]
  * @returns {{

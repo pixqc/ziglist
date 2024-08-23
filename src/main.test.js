@@ -257,106 +257,104 @@ describe("db inserts and reads", () => {
 		}
 	});
 
-	// test("should process and insert dependencies correctly", async () => {
-	// 	for (const repo of repos) {
-	// 		const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
-	// 		const zonData = await zonFile.json();
-	// 		const zonExists = zonData.status === 200;
-	// 		if (!zonExists) continue;
-	// 		const parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
-	// 		const repoStmt = db.prepare(
-	// 			`SELECT id FROM repos WHERE full_name = ? AND platform = ?`,
-	// 		);
-	// 		const repoResult = repoStmt.get(repo.full_name, repo.platform);
-	// 		expect(repoResult).toBeDefined();
-	// 		const repoId = repoResult.id;
-	//
-	// 		// intentionally duplicated
-	// 		for (let i = 0; i < 5; i++) {
-	// 			if (parsed.urlDeps.length > 0)
-	// 				insertUrlDependencies(db, parsed.urlDeps);
-	// 			if (parsed.deps.length > 0) upsertDependencies(db, parsed.deps, repoId);
-	// 		}
-	//
-	// 		const urlDepStmt = db.prepare(
-	// 			`SELECT *
-	// 			FROM url_dependencies
-	// 			WHERE hash IN (
-	// 				SELECT url_dependency_hash
-	// 				FROM zig_repo_dependencies
-	// 				WHERE repo_id = ?
-	// 			)`,
-	// 		);
-	// 		const urlDepResults = urlDepStmt.all(repoId);
-	// 		expect(urlDepResults).toHaveLength(parsed.urlDeps.length);
-	// 		for (const expectedUrlDep of parsed.urlDeps) {
-	// 			const actualUrlDep = urlDepResults.find(
-	// 				(d) => d.hash === expectedUrlDep.hash,
-	// 			);
-	// 			expect(actualUrlDep).toBeDefined();
-	// 			expect(actualUrlDep).toEqual(
-	// 				expect.objectContaining({
-	// 					hash: expectedUrlDep.hash,
-	// 					name: expectedUrlDep.name,
-	// 					url: expectedUrlDep.url,
-	// 				}),
-	// 			);
-	// 		}
-	//
-	// 		const depStmt = db.prepare(
-	// 			`SELECT *
-	// 			FROM zig_repo_dependencies
-	// 			WHERE repo_id = ?`,
-	// 		);
-	// 		const depResults = depStmt.all(repoId);
-	// 		expect(depResults).toHaveLength(parsed.deps.length);
-	// 		for (const expectedDep of parsed.deps) {
-	// 			const actualDep = depResults.find((d) => d.name === expectedDep.name);
-	// 			expect(actualDep).toBeDefined();
-	// 			expect(actualDep).toEqual(
-	// 				expect.objectContaining({
-	// 					repo_id: repoId,
-	// 					name: expectedDep.name,
-	// 					dependency_type: expectedDep.dependency_type,
-	// 					path: expectedDep.path,
-	// 					url_dependency_hash: expectedDep.url_dependency_hash,
-	// 				}),
-	// 			);
-	// 		}
-	// 	}
-	// });
+	test("should process and insert dependencies correctly", async () => {
+		for (const repo of repos) {
+			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
+			const zonData = await zonFile.json();
+			const zonExists = zonData.status === 200;
+			if (!zonExists) continue;
+			const parsed = extractZon(JSON.parse(zon2json(zonData.content)));
+			const repoStmt = db.prepare(
+				`SELECT id FROM repos WHERE full_name = ? AND platform = ?`,
+			);
+			const repoResult = repoStmt.get(repo.full_name, repo.platform);
+			expect(repoResult).toBeDefined();
+			const repoId = repoResult.id;
 
-	// test("should match deps parsed data with joined database entries", async () => {
-	// 	for (const repo of repos) {
-	// 		const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
-	// 		const zonData = await zonFile.json();
-	// 		if (zonData.status !== 200) continue;
-	// 		const parsed = SchemaZon.parse(JSON.parse(zon2json(zonData.content)));
-	// 		const repoStmt = db.prepare(
-	// 			`SELECT id
-	// 				FROM repos
-	// 				WHERE full_name = ? AND platform = ?`,
-	// 		);
-	// 		const repoResult = repoStmt.get(repo.full_name, repo.platform);
-	// 		expect(repoResult).toBeDefined();
-	// 		const repoId = repoResult.id;
-	//
-	// 		const joinStmt = db.prepare(
-	// 			`SELECT
-	// 				r.*,
-	// 				GROUP_CONCAT(d.name) AS dependencies
-	// 			FROM repos r
-	// 			LEFT JOIN zig_repo_dependencies d ON r.id = d.repo_id
-	// 			WHERE r.id = ?
-	// 			GROUP BY r.id
-	// 		`,
-	// 		);
-	// 		const joinResult = joinStmt.get(repoId);
-	// 		const dbSet = new Set(joinResult.dependencies.split(","));
-	// 		const parsedSet = new Set(parsed.deps.map((d) => d.name));
-	// 		expect(dbSet).toEqual(parsedSet);
-	// 	}
-	// });
+			// intentionally duplicated
+			for (let i = 0; i < 5; i++) {
+				if (parsed.urlDeps.length > 0)
+					insertUrlDependencies(db, parsed.urlDeps);
+				if (parsed.deps.length > 0) upsertDependencies(db, parsed.deps, repoId);
+			}
+			const urlDepStmt = db.prepare(
+				`SELECT *
+				FROM url_dependencies
+				WHERE hash IN (
+					SELECT url_dependency_hash
+					FROM repo_dependencies
+					WHERE repo_id = ?
+				)`,
+			);
+			const urlDepResults = urlDepStmt.all(repoId);
+			expect(urlDepResults).toHaveLength(parsed.urlDeps.length);
+			for (const expectedUrlDep of parsed.urlDeps) {
+				const actualUrlDep = urlDepResults.find(
+					(d) => d.hash === expectedUrlDep.hash,
+				);
+				expect(actualUrlDep).toBeDefined();
+				expect(actualUrlDep).toEqual(
+					expect.objectContaining({
+						hash: expectedUrlDep.hash,
+						name: expectedUrlDep.name,
+						url: expectedUrlDep.url,
+					}),
+				);
+			}
+			const depStmt = db.prepare(
+				`SELECT *
+				FROM repo_dependencies
+				WHERE repo_id = ?`,
+			);
+			const depResults = depStmt.all(repoId);
+			expect(depResults).toHaveLength(parsed.deps.length);
+			for (const expectedDep of parsed.deps) {
+				const actualDep = depResults.find((d) => d.name === expectedDep.name);
+				expect(actualDep).toBeDefined();
+				expect(actualDep).toEqual(
+					expect.objectContaining({
+						repo_id: repoId,
+						name: expectedDep.name,
+						dependency_type: expectedDep.dependency_type,
+						path: expectedDep.path,
+						url_dependency_hash: expectedDep.url_dependency_hash,
+					}),
+				);
+			}
+		}
+	});
+
+	test("should match deps parsed data with joined database entries", async () => {
+		for (const repo of repos) {
+			const zonFile = Bun.file(getCacheFilename("metadata-zon", repo));
+			const zonData = await zonFile.json();
+			if (zonData.status !== 200) continue;
+			const parsed = extractZon(JSON.parse(zon2json(zonData.content)));
+			const repoStmt = db.prepare(
+				`SELECT id
+					FROM repos
+					WHERE full_name = ? AND platform = ?`,
+			);
+			const repoResult = repoStmt.get(repo.full_name, repo.platform);
+			expect(repoResult).toBeDefined();
+			const repoId = repoResult.id;
+
+			const joinStmt = db.prepare(
+				`SELECT
+					r.*,
+					GROUP_CONCAT(d.name) AS dependencies
+				FROM repos r
+				LEFT JOIN repo_dependencies d ON r.id = d.repo_id
+				WHERE r.id = ?
+				GROUP BY r.id
+			`,
+			);
+			const joinResult = joinStmt.get(repoId);
+			const dbSet = new Set(joinResult.dependencies.split(","));
+			const parsedSet = new Set(parsed.deps.map((d) => d.name));
+			expect(dbSet).toEqual(parsedSet);
+		}
+	});
 
 	afterAll(() => {
 		db.close();
@@ -419,35 +417,27 @@ describe("fetches", () => {
 		initDB(db);
 	});
 
-	// test("should parse top github repos", async () => {
-	// 	["1", "2"].forEach(async (page) => {
-	// 		const filename = `./.http-cache/github-top-${page}.json`;
-	// 		const file = Bun.file(filename);
-	// 		const data = await file.json();
-	// 		expect(data.items).toHaveLength(100);
-	// 		const schema = getSchemaRepo("github");
-	// 		for (const item of data.items) {
-	// 			const tryParsed = schema.safeParse(item);
-	// 			if (!tryParsed.success) console.error(tryParsed.error);
-	// 			expect(tryParsed.success).toBe(true);
-	// 		}
-	// 	});
-	// });
-	//
-	// test("should parse top codeberg repos", async () => {
-	// 	["1", "2"].forEach(async (page) => {
-	// 		const filename = `./.http-cache/codeberg-top-${page}.json`;
-	// 		const file = Bun.file(filename);
-	// 		const data = await file.json();
-	// 		expect(data.data).toHaveLength(50);
-	// 		const schema = getSchemaRepo("codeberg");
-	// 		for (const item of data.data) {
-	// 			const tryParsed = schema.safeParse(item);
-	// 			if (!tryParsed.success) console.error(tryParsed.error);
-	// 			expect(tryParsed.success).toBe(true);
-	// 		}
-	// 	});
-	// });
+	test("should parse top github repos", async () => {
+		["1", "2"].forEach(async (page) => {
+			const filename = `./.http-cache/github-top-${page}.json`;
+			const file = Bun.file(filename);
+			const data = await file.json();
+			expect(data.items).toHaveLength(100);
+			const extractor = repoExtractors["github"];
+			for (const item of data.items) expect(extractor(item)).toBeDefined();
+		});
+	});
+
+	test("should parse top codeberg repos", async () => {
+		["1", "2"].forEach(async (page) => {
+			const filename = `./.http-cache/codeberg-top-${page}.json`;
+			const file = Bun.file(filename);
+			const data = await file.json();
+			expect(data.data).toHaveLength(50);
+			const extractor = repoExtractors["codeberg"];
+			for (const item of data.data) expect(extractor(item)).toBeDefined();
+		});
+	});
 
 	test("items from fetch all should be below 1k", async () => {
 		const glob = new Glob("./.http-cache/github-all-*.json");
