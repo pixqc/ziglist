@@ -758,6 +758,38 @@ export const headers = {
 };
 
 // ----------------------------------------------------------------------------
+// crons
+
+/**
+ * @param {'github' | 'codeberg'} platform
+ * @param {'top' | 'all'} type
+ * @returns {Promise<void>}
+ */
+const fetchAndUpsertRepo = async (platform, type) => {
+	let url = type === "top" ? getTopRepoURL(platform) : getAllRepoURL(platform);
+	while (url) {
+		const response = await fetch(url, { headers: headers[platform] });
+		if (response.status !== 200) {
+			logger.error(
+				`fetch - fetchAndUpsertRepo - ${platform} ${type} - HTTP ${response.status}`,
+			);
+			break;
+		}
+		const data = await response.json();
+		let items = platform === "codeberg" ? data.data : data.items;
+		items = Array.isArray(items) ? items.filter(Boolean) : [];
+		const parsed = items.map(repoExtractors[platform]);
+		upsertZigRepos(db, parsed);
+		logger.info(
+			`fetch - fetchAndUpsertRepo - ${platform} ${type} - ${items.length} repos - url: ${url}`,
+		);
+		// @ts-ignore - undefined is expected
+		url = getNextURL(response);
+	}
+	logger.info(`fetch - fetchAndUpsertRepo - ${platform} ${type} - completed`);
+};
+
+// ----------------------------------------------------------------------------
 // jsx components
 // note: this is not a React application, jsx is only for templating
 
@@ -1406,11 +1438,15 @@ export default {
 	fetch: app.fetch,
 };
 
-const db = new Database("a.sqlite");
+const db = new Database(":memory:");
 initDB(db);
-const filename = `./.http-cache/github-top-1.json`;
-const file = Bun.file(filename);
-const data = await file.json();
-const parsed = data.items.map(repoExtractors["github"]);
-upsertZigRepos(db, parsed);
-rebuildFts();
+fetchAndUpsertRepo("codeberg", "top");
+// fetchAndUpsertRepo("github", "all");
+// fetchAndUpsertRepo("codeberg", "top");
+
+// const filename = `./.http-cache/github-top-1.json`;
+// const file = Bun.file(filename);
+// const data = await file.json();
+// const parsed = data.items.map(repoExtractors["github"]);
+// upsertZigRepos(db, parsed);
+// rebuildFts();
