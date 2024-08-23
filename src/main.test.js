@@ -19,6 +19,7 @@ import {
 	upsertMetadata,
 	getNextURL,
 	dateGenerator,
+	repoExtractors,
 } from "./main.jsx";
 
 /** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} Repo */
@@ -103,13 +104,12 @@ describe("db inserts and reads", () => {
 		initDB(db);
 	});
 
-	test("should not insert duplicate repos", async () => {
+	test.only("should not insert duplicate repos", async () => {
 		for (const repo of repos) {
-			const platform = repo.platform;
-			const schema = getSchemaRepo(platform);
 			const file = Bun.file(getCacheFilename("repo", repo));
 			const data = await file.json();
-			const parsed = schema.parse(data);
+			const extractor = repoExtractors[repo.platform];
+			const parsed = extractor(data);
 
 			upsertZigRepos(db, [parsed, parsed, parsed, parsed, parsed]);
 			const stmt = db.prepare(
@@ -117,10 +117,25 @@ describe("db inserts and reads", () => {
 					FROM zig_repos 
 					WHERE full_name = ? AND platform = ?`,
 			);
+
 			const result = stmt.all(repo.full_name, repo.platform);
 			expect(result).toHaveLength(1);
-			expect(result[0].full_name).toBe(repo.full_name);
-			expect(result[0].platform).toBe(repo.platform);
+			expect(result[0].full_name).toBe(parsed.full_name);
+			expect(result[0].platform).toBe(parsed.platform);
+			expect(result[0].name).toBe(parsed.name);
+			expect(result[0].default_branch).toBe(parsed.default_branch);
+			expect(result[0].owner).toBe(parsed.owner);
+			expect(result[0].created_at).toBe(parsed.created_at);
+			expect(result[0].updated_at).toBe(parsed.updated_at);
+			expect(result[0].pushed_at).toBe(parsed.pushed_at);
+			expect(result[0].description).toBe(parsed.description);
+			expect(result[0].homepage).toBe(parsed.homepage);
+			expect(result[0].license).toBe(parsed.license);
+			expect(result[0].language).toBe(parsed.language);
+			expect(result[0].stars).toBe(parsed.stars);
+			expect(result[0].forks).toBe(parsed.forks);
+			expect(Boolean(result[0].is_fork)).toBe(parsed.is_fork);
+			expect(Boolean(result[0].is_archived)).toBe(parsed.is_archived);
 		}
 	});
 

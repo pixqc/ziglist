@@ -213,6 +213,29 @@ export const getNextURL = (response) => {
 // ----------------------------------------------------------------------------
 // queries
 
+// snake case and null because to keep consistency with db
+
+/**
+ * @typedef {Object} ZigRepo
+ * @property {number} id
+ * @property {string} full_name
+ * @property {string} platform
+ * @property {string} name
+ * @property {string} default_branch
+ * @property {string} owner
+ * @property {number} created_at
+ * @property {number} updated_at
+ * @property {number} pushed_at
+ * @property {string | null} description
+ * @property {string | null} homepage
+ * @property {string | null} license
+ * @property {string | null} language
+ * @property {number} stars
+ * @property {number} forks
+ * @property {boolean} is_fork
+ * @property {boolean} is_archived
+ */
+
 /**
  * @param {Database} conn
  * @returns {void}
@@ -225,19 +248,19 @@ export const initDB = (conn) => {
 		full_name TEXT NOT NULL,
 		platform TEXT NOT NULL,
 		name TEXT,
+		default_branch TEXT,
 		owner TEXT,
-		description TEXT NULL,
-		homepage TEXT NULL,
-		license TEXT NULL,
 		created_at INTEGER,
 		updated_at INTEGER,
 		pushed_at INTEGER,
+		description TEXT NULL,
+		homepage TEXT NULL,
+		license TEXT NULL,
+		language TEXT NULL,
 		stars INTEGER,
 		forks INTEGER,
 		is_fork BOOLEAN,
 		is_archived BOOLEAN,
-		default_branch TEXT,
-		language TEXT,
 		UNIQUE (platform, full_name)
 	);`);
 	conn.exec(`
@@ -325,7 +348,7 @@ export const upsertMetadata = (conn, parsed) => {
 
 /**
  * @param {Database} conn
- * @param {z.infer<ReturnType<typeof getSchemaRepo>>[]} parsed
+ * @param {ZigRepo[]} parsed
  */
 export const upsertZigRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
@@ -460,6 +483,58 @@ export const upsertDependencies = (conn, parsed, repo_id) => {
 	} finally {
 		if (stmt) stmt.finalize();
 	}
+};
+
+// ----------------------------------------------------------------------------
+// extractors
+
+/**
+ * @param {any} data
+ * @returns {ZigRepo} The extracted GitHub repo data.
+ */
+const extractGithub = (data) => ({
+	id: data.id,
+	full_name: data.full_name,
+	platform: "github",
+	name: data.name,
+	default_branch: data.default_branch,
+	owner: data.owner.login,
+	created_at: dateToUnix(data.created_at),
+	updated_at: dateToUnix(data.updated_at),
+	pushed_at: dateToUnix(data.pushed_at),
+	description: data.description ?? null,
+	homepage: data.homepage ?? null,
+	license: data.license?.spdx_id ?? null,
+	language: data.language ?? null,
+	stars: data.stargazers_count ?? 0,
+	forks: data.forks_count,
+	is_fork: data.fork,
+	is_archived: data.archived,
+});
+
+const extractCodeberg = (data) => ({
+	id: data.id,
+	full_name: data.full_name,
+	platform: "codeberg",
+	name: data.name,
+	default_branch: data.default_branch,
+	owner: data.owner.login,
+	created_at: dateToUnix(data.created_at),
+	updated_at: dateToUnix(data.updated_at),
+	pushed_at: dateToUnix(data.updated_at),
+	description: data.description ?? null,
+	homepage: data.homepage ?? null,
+	license: data.license?.spdx_id ?? null,
+	language: data.language ?? null,
+	stars: data.stars_count ?? 0,
+	forks: data.forks_count,
+	is_fork: data.fork,
+	is_archived: data.archived,
+});
+
+export const repoExtractors = {
+	github: extractGithub,
+	codeberg: extractCodeberg,
 };
 
 // ----------------------------------------------------------------------------
