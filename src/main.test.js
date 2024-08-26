@@ -21,6 +21,13 @@ import {
 	repoExtractors,
 } from "./main.jsx";
 
+const CACHE_DIR = "./.http-cache";
+const DB_NAME = ":memory:";
+
+// TODO:
+// - fts
+// - fetch -> insert -> read (server's query) should be in good state
+
 /** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} RepoName */
 
 // biome-ignore format: off
@@ -29,11 +36,11 @@ const repos = [
 	{ full_name: "ziglang/zig", default_branch: "master", platform: "github" },
 	{ full_name: "ggerganov/ggml", default_branch: "master", platform: "github" },
 	{ full_name: "fairyglade/ly", default_branch: "master", platform: "github" },
+	{ full_name: "Hejsil/zig-clap", default_branch: "master", platform: "github" },
 	{ full_name: "dude_the_builder/zigstr", default_branch: "main", platform: "codeberg" },
 	{ full_name: "grayhatter/player", default_branch: "main", platform: "codeberg" },
 	{ full_name: "ziglings/exercises", default_branch: "main", platform: "codeberg" },
 ];
-const CACHE_DIR = "./.http-cache";
 
 /**
  * @param {'repo' | 'metadata-zig' | 'metadata-zon'} type
@@ -99,7 +106,7 @@ describe("db inserts and reads", () => {
 		]);
 		await Promise.all(promises);
 
-		db = new Database(":memory:");
+		db = new Database(DB_NAME);
 		initDB(db);
 	});
 
@@ -350,7 +357,10 @@ describe("db inserts and reads", () => {
 			`,
 			);
 			const joinResult = joinStmt.get(repoId);
-			const dbSet = new Set(joinResult.dependencies.split(","));
+			const dbSet =
+				joinResult.dependencies == null
+					? new Set()
+					: new Set(joinResult.dependencies.split(","));
 			const parsedSet = new Set(parsed.deps.map((d) => d.name));
 			expect(dbSet).toEqual(parsedSet);
 		}
@@ -383,6 +393,7 @@ const cacheTopRepos = async (platform, pages) => {
 
 /**
  * only the first page, go through all date ranges, github only
+ * FIXME: refetches on --rerun-each 5
  *
  * @param {'github' | 'codeberg'} platform
  * @returns {Promise<void>}
@@ -413,7 +424,7 @@ describe("fetches", () => {
 			cacheAllRepos("github"),
 		]);
 
-		db = new Database(":memory:");
+		db = new Database(DB_NAME);
 		initDB(db);
 	});
 
