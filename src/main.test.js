@@ -19,7 +19,7 @@ import {
 	getNextURL,
 	dateGenerator,
 	repoExtractors,
-} from "./main.jsx";
+} from "./main.js";
 
 const CACHE_DIR = "./.http-cache";
 const DB_NAME = ":memory:";
