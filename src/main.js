@@ -9,7 +9,7 @@ export const MINUTELY = 60 * SECONLY;
 export const HOURLY = 60 * MINUTELY;
 export const DAILY = 24 * HOURLY;
 
-/** @typedef {{full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} RepoName */
+/** @typedef {{id: number, full_name: string, default_branch: string, platform: 'github' | 'codeberg'}} RepoName */
 /** @typedef {('trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal')} LogLevel */
 
 /**
@@ -82,7 +82,7 @@ export const logger = createLogger();
  * @param {string} message - Error message to log.
  * @param {Object} [data] - Additional data to log (optional).
  */
-const fatal = (message, data) => {
+export const fatal = (message, data) => {
 	logger.fatal(message, data);
 	logger.flush();
 	process.exit(1);
@@ -92,7 +92,7 @@ const fatal = (message, data) => {
  * @param {string} dateString
  * @returns {number}
  */
-const dateToUnix = (dateString) =>
+export const dateToUnix = (dateString) =>
 	Math.floor(new Date(dateString).getTime() / 1000);
 
 /**
@@ -117,19 +117,27 @@ export const zon2json = (zon) => {
 };
 
 /**
- * @param {string} url - return of getBuildZigURL or getZigZonURL
- * @returns {Promise<{
- *  status: number,
- *  fetched_at: number,
- *  content: string,
- *  }>}
+ * @param {RepoName} repo
+ * @returns {Promise<RepoBuildZig>}
  */
-export const fetchMetadata = async (url) => {
-	const response = await fetch(url);
+export const fetchBuildZig = async (repo) => {
+	const zigURL = getZigURL(repo);
+	const zonURL = getZonURL(repo);
+	const [zigResponse, zonResponse] = await Promise.all([
+		fetch(zigURL, { headers: headers[repo.platform] }),
+		fetch(zonURL, { headers: headers[repo.platform] }),
+	]);
 	return {
-		status: response.status,
+		repo_id: repo.id,
 		fetched_at: Math.floor(Date.now() / 1000),
-		content: await response.text(),
+		build_zig_content:
+			zigResponse.status === 200
+				? (await zigResponse.text()).slice(0, 10)
+				: null,
+		build_zig_zon_content:
+			zonResponse.status === 200
+				? (await zonResponse.text()).slice(0, 10)
+				: null,
 	};
 };
 
@@ -236,12 +244,10 @@ export const getNextURL = (response) => {
  * @property {boolean} is_archived
  */
 
-/**
- * @typedef {Object} RepoMetadata
+/** @typedef {Object} RepoBuildZig
  * @property {number} repo_id
- * @property {string | null} min_zig_version
- * @property {boolean} build_zig_exists
- * @property {boolean} build_zig_zon_exists
+ * @property {string | null} build_zig_content
+ * @property {string | null} build_zig_zon_content
  * @property {number} fetched_at
  */
 
@@ -287,16 +293,15 @@ export const initDB = (conn) => {
 		UNIQUE (platform, full_name)
 	);`);
 	conn.exec(`
-	CREATE TABLE IF NOT EXISTS repo_metadata (
+	CREATE TABLE IF NOT EXISTS repo_build_zig (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		repo_id INTEGER NOT NULL, 
-		min_zig_version TEXT,
-		build_zig_exists BOOLEAN NULL,
-		build_zig_zon_exists BOOLEAN NULL,
+		repo_id INTEGER NOT NULL,
+		build_zig_content TEXT NULL,
+		build_zig_zon_content TEXT NULL,
 		fetched_at INTEGER NULL,
 		FOREIGN KEY (repo_id) REFERENCES repos(id) 
 			ON DELETE CASCADE, 
-		UNIQUE(repo_id) 
+		UNIQUE(repo_id)
 	);`);
 	conn.exec(`
 	CREATE TABLE IF NOT EXISTS url_dependencies (
@@ -313,7 +318,7 @@ export const initDB = (conn) => {
 		path TEXT,
 		url_dependency_hash TEXT,
 		FOREIGN KEY (repo_id) REFERENCES repos(id) 
-				ON DELETE CASCADE,
+			ON DELETE CASCADE,
 		FOREIGN KEY (url_dependency_hash) REFERENCES url_dependencies (hash),
 		UNIQUE(repo_id, name, dependency_type, path),
 		UNIQUE(repo_id, name, dependency_type, url_dependency_hash)
@@ -324,7 +329,7 @@ export const initDB = (conn) => {
  * @param {Database} conn
  * @param {Repo[]} parsed
  */
-export const upsertZigRepos = (conn, parsed) => {
+export const upsertRepos = (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO repos (
 			platform, full_name, name, owner, description, homepage, license, 
@@ -386,39 +391,36 @@ export const upsertZigRepos = (conn, parsed) => {
 
 /**
  * @param {Database} conn
- * @param {RepoMetadata[]} parsed
+ * @param {RepoBuildZig[]} parsed
  */
-export const upsertMetadata = (conn, parsed) => {
+export const upsertBuildZig = (conn, parsed) => {
 	const stmt = conn.prepare(`
-		INSERT INTO repo_metadata (
-			repo_id,
-			min_zig_version,
-			build_zig_exists,
-			build_zig_zon_exists,
-			fetched_at
-		) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(repo_id) DO UPDATE SET
-			min_zig_version = excluded.min_zig_version,
-			build_zig_exists = excluded.build_zig_exists,
-			build_zig_zon_exists = excluded.build_zig_zon_exists,
-			fetched_at = excluded.fetched_at
+	INSERT INTO repo_build_zig (
+		repo_id, build_zig_content, build_zig_zon_content, fetched_at
+	) VALUES (?, ?, ?, ?)
+	ON CONFLICT(repo_id) DO UPDATE SET
+		build_zig_content = excluded.build_zig_content,
+		build_zig_zon_content = excluded.build_zig_zon_content,
+		fetched_at = excluded.fetched_at
 	`);
 	try {
-		const bulkUpdate = conn.transaction((data) => {
+		const upsertMany = conn.transaction((data) => {
 			for (const row of data) {
-				stmt.run(
-					row.repo_id,
-					row.min_zig_version,
-					row.build_zig_exists,
-					row.build_zig_zon_exists,
-					row.fetched_at,
-				);
+				stmt.run(row);
 			}
 		});
-		bulkUpdate(parsed);
-		logger.info(`db - upsertMetadata - len ${parsed.length}`);
+
+		const rows = parsed.map((item) => [
+			item.repo_id,
+			item.build_zig_content,
+			item.build_zig_zon_content,
+			item.fetched_at,
+		]);
+
+		upsertMany(rows);
+		logger.info(`db - upsertBuildZig - len ${rows.length}`);
 	} catch (e) {
-		logger.error(`db - upsertMetadata - ${e}`);
+		logger.error(`db - upsertBuildZig - ${e}`);
 	} finally {
 		if (stmt) stmt.finalize();
 	}
@@ -485,17 +487,20 @@ export const upsertDependencies = (conn, parsed, repo_id) => {
 	}
 };
 
-export const rebuildFts = () => {
+/**
+ * @param {Database} conn
+ */
+export const rebuildFts = (conn) => {
 	try {
-		db.exec(`DROP TABLE IF EXISTS repos_fts;`);
-		db.exec(`
+		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
+		conn.exec(`
 			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
 				owner, 
 				name,
 				full_name,
 				description
 			);`);
-		db.exec(`
+		conn.exec(`
 			INSERT INTO repos_fts(owner, name, full_name, description)
 				SELECT owner, name, full_name, description
 				FROM repos;
@@ -642,18 +647,18 @@ export const extractZon = (data) => {
  * @param {string} filename
  * @returns {(repo: RepoName) => string}
  */
-const getMetadataURL = (filename) => (repo) => {
+const getBuildZigURL = (filename) => (repo) => {
 	if (repo.platform === "github") {
 		return `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch}/${filename}`;
 	} else if (repo.platform === "codeberg") {
 		return `https://codeberg.org/${repo.full_name}/raw/branch/${repo.default_branch}/${filename}`;
 	}
-	fatal(`getMetadataURL - invalid platform ${repo.platform}`);
+	fatal(`getBuildZigURL - invalid platform ${repo.platform}`);
 	return ""; // unreachable
 };
 
-export const getZigBuildURL = getMetadataURL("build.zig");
-export const getZigZonURL = getMetadataURL("build.zig.zon");
+export const getZigURL = getBuildZigURL("build.zig");
+export const getZonURL = getBuildZigURL("build.zig.zon");
 
 /**
  * @param {'github' | 'codeberg'} platform
@@ -760,91 +765,3 @@ export const headers = {
 		Authorization: `token ${CODEBERG_API_KEY}`,
 	},
 };
-
-////// ----------------------------------------------------------------------------
-////// crons
-////
-/////**
-/// * @param {'github' | 'codeberg'} platform
-//// * @param {'top' | 'all'} type
-//// * @returns {Promise<void>}
-//// */
-////const fetchAndUpsertRepo = async (platform, type) => {
-////	let url = type === "top" ? getTopRepoURL(platform) : getAllRepoURL(platform);
-////	while (url) {
-////		const response = await fetch(url, { headers: headers[platform] });
-////		if (response.status !== 200) {
-////			logger.error(
-////				`fetch - fetchAndUpsertRepo - ${platform} ${type} - HTTP ${response.status}`,
-////			);
-////			break;
-////		}
-////		const data = await response.json();
-////		let items = platform === "codeberg" ? data.data : data.items;
-////		items = Array.isArray(items) ? items.filter(Boolean) : [];
-////		const parsed = items.map(repoExtractors[platform]);
-////		upsertZigRepos(db, parsed);
-////		logger.info(
-////			`fetch - fetchAndUpsertRepo - ${platform} ${type} - ${items.length} repos - url: ${url}`,
-////		);
-////		// @ts-ignore - undefined is expected
-////		url = getNextURL(response);
-////	}
-////	logger.info(`fetch - fetchAndUpsertRepo - ${platform} ${type} - completed`);
-////};
-////
-//
-//const db = new Database(":memory:");
-//initDB(db);
-//
-//// top github
-//setInterval(async () => {
-//	const platform = "github";
-//	/** @type {string | undefined} */
-//	let url = getTopRepoURL(platform);
-//	while (url) {
-//		const response = await fetch(url, { headers: headers[platform] });
-//		if (response.status !== 200) {
-//			logger.error(
-//				`fetch - fetchAndUpsertRepo - ${platform} top - HTTP ${response.status}`,
-//			);
-//			break;
-//		}
-//		const data = await response.json();
-//		const items = Array.isArray(data.items) ? data.items.filter(Boolean) : [];
-//		const parsed = items.map(repoExtractors[platform]);
-//		upsertZigRepos(db, parsed);
-//		logger.info(
-//			`fetch - fetchAndUpsertRepo - ${platform} top - ${items.length} repos - url: ${url}`,
-//		);
-//		url = getNextURL(response);
-//	}
-//	logger.info(`fetch - fetchAndUpsertRepo - ${platform} top - completed`);
-//}, HOURLY * 30);
-//
-//// top codeberg
-//setInterval(async () => {
-//	const platform = "codeberg";
-//	/** @type {string | undefined} */
-//	let url = getTopRepoURL(platform);
-//	while (url) {
-//		const response = await fetch(url, { headers: headers[platform] });
-//		if (response.status !== 200) {
-//			logger.error(
-//				`fetch - fetchAndUpsertRepo - ${platform} top - HTTP ${response.status}`,
-//			);
-//			break;
-//		}
-//		const data = await response.json();
-//		const items = Array.isArray(data.data) ? data.data.filter(Boolean) : [];
-//		const parsed = items.map(repoExtractors[platform]);
-//		upsertZigRepos(db, parsed);
-//		logger.info(
-//			`fetch - fetchAndUpsertRepo - ${platform} top - ${items.length} repos - url: ${url}`,
-//		);
-//		url = getNextURL(response);
-//	}
-//	logger.info(`fetch - fetchAndUpsertRepo - ${platform} top - completed`);
-//}, HOURLY * 3);
-
-// use worker

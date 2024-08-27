@@ -9,6 +9,7 @@ import {
 	MINUTELY,
 } from "./main.js";
 const repoWorker = new Worker("./src/repo-worker.js");
+const zonWorker = new Worker("./src/zon-worker.js");
 
 const LucideChevronLeft = () => (
 	<svg
@@ -657,20 +658,12 @@ export default {
 	fetch: app.fetch,
 };
 
-// TODO: zonWorker
+//repoWorker.postMessage({
+//	type: "top",
+//	platform: "github",
+//	dbFilename: db.filename,
+//});
 
-repoWorker.postMessage({
-	type: "all",
-	platform: "github",
-	dbFilename: db.filename,
-});
-repoWorker.postMessage({
-	type: "top",
-	platform: "github",
-	dbFilename: db.filename,
-});
-repoWorker.postMessage({
-	type: "top",
-	platform: "codeberg",
+zonWorker.postMessage({
 	dbFilename: db.filename,
 });

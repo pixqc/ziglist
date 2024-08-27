@@ -4,7 +4,7 @@ import {
 	headers,
 	getTopRepoURL,
 	repoExtractors,
-	upsertZigRepos,
+	upsertRepos,
 	getNextURL,
 	getAllRepoURL,
 } from "./main.js";
@@ -15,8 +15,7 @@ self.onmessage = async (event) => {
 	);
 	const type = event.data.type;
 	const platform = event.data.platform;
-	const dbFilename = event.data.dbFilename;
-	const db = new Database(dbFilename);
+	const db = new Database(event.data.dbFilename);
 	/** @type {string | undefined} */
 	let url = type === "top" ? getTopRepoURL(platform) : getAllRepoURL(platform);
 	while (url) {
@@ -31,11 +30,15 @@ self.onmessage = async (event) => {
 		let items = platform === "codeberg" ? data.data : data.items;
 		items = Array.isArray(items) ? items.filter(Boolean) : [];
 		const parsed = items.map(repoExtractors[platform]);
-		upsertZigRepos(db, parsed);
+		upsertRepos(db, parsed);
 		logger.info(
 			`fetch - fetchAndUpsertRepo - ${platform} ${type} - ${items.length} repos - url: ${url}`,
 		);
 		url = getNextURL(response);
 	}
 	logger.info(`fetch - fetchAndUpsertRepo - ${platform} ${type} - completed`);
+};
+
+self.onerror = (e) => {
+	logger.error(`repo-worker - ${e}`);
 };
