@@ -860,7 +860,7 @@ export const rebuildFts = async (conn) => {
 		conn.exec("BEGIN TRANSACTION;");
 		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
 		conn.exec(`
-			CREATE VIRTUAL TABLE repos_fts USING fts5(
+			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
 				owner, 
 				name,
 				full_name,
@@ -869,8 +869,8 @@ export const rebuildFts = async (conn) => {
 				content_rowid='id'
 			);`);
 		conn.exec(`
-			INSERT INTO repos_fts(owner, name, full_name, description)
-				SELECT owner, name, full_name, description
+			INSERT INTO repos_fts(rowid, owner, name, full_name, description)
+				SELECT id, owner, name, full_name, description
 				FROM repos;
 		`);
 
