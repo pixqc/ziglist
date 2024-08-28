@@ -690,19 +690,11 @@ app.get("/search", (c) => {
 
 app.get("/dependencies", (c) => {
 	const stmt = db.prepare(serverDependencyQuery);
-	//let deps = stmt.all();
-	//// json parse the deps
-	//deps = JSON.parse(deps[0].dependencies);
-	//console.log(deps);
-
 	let repos = stmt.all();
 	repos = repos.map((repo) => ({
 		...repo,
 		dependencies: JSON.parse(repo.dependencies),
 	}));
-	for (const repo of repos) {
-		console.log(repo.dependencies);
-	}
 
 	logger.info(`server.GET /dependencies - ${repos.length} from db`);
 	return c.html(
@@ -730,28 +722,26 @@ setInterval(() => {
 	logger.flush();
 }, SECONDLY * 10);
 
-if (process.env.IS_PROD) {
-	fetchRepo(db, "github", "top");
+//fetchRepo(db, "github", "top");
+//fetchRepo(db, "codeberg", "top");
+rebuildFts(db);
+
+setInterval(() => {
+	fetchRepo(db, "github", "all");
+}, MINUTELY * 5);
+
+setInterval(() => {
 	fetchRepo(db, "codeberg", "top");
+}, HOURLY * 2);
+
+setInterval(() => {
+	fetchBuildZig(db);
+}, MINUTELY);
+
+setInterval(() => {
+	processBuildZig(db);
+}, MINUTELY);
+
+setInterval(() => {
 	rebuildFts(db);
-
-	setInterval(() => {
-		fetchRepo(db, "github", "all");
-	}, MINUTELY * 5);
-
-	setInterval(() => {
-		fetchRepo(db, "codeberg", "top");
-	}, HOURLY * 2);
-
-	setInterval(() => {
-		fetchBuildZig(db);
-	}, MINUTELY);
-
-	setInterval(() => {
-		processBuildZig(db);
-	}, MINUTELY);
-
-	setInterval(() => {
-		rebuildFts(db);
-	}, HOURLY * 3);
-}
+}, HOURLY * 3);
