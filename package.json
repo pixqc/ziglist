@@ -8,10 +8,9 @@
     "typescript": "^5.0.0"
   },
   "scripts": {
-    "start": "IS_PROD=1 bun run src/main.jsx",
-    "dev:main": "bun run --watch src/main.jsx",
+    "start": "IS_PROD=1 bun run src/server.jsx",
+    "dev:main": "bun run --watch src/server.jsx",
     "dev:tailwind": "bunx tailwindcss -i ./assets/style.css -o ./assets/tailwind.css --minify",
-    "dev:restore": "bun run src/restore.js",
     "dev:clean": "rm db.sqlite db.sqlite-shm db.sqlite-wal",
     "dev:init": "bun run dev:tailwind && bun run dev:restore",
     "dev": "bun run dev:tailwind --watch & bun run dev:main"
