@@ -8,13 +8,14 @@ import {
 	serverNewQuery,
 	serverTopQuery,
 	serverSearchQuery,
+	serverDependencyQuery,
 	fetchBuildZig,
 	processBuildZig,
 	rebuildFts,
 } from "./main.js";
 
-const SECONLY = 1000;
-const MINUTELY = 60 * SECONLY;
+const SECONDLY = 1000;
+const MINUTELY = 60 * SECONDLY;
 const HOURLY = 60 * MINUTELY;
 const DAILY = 24 * HOURLY;
 
@@ -276,6 +277,62 @@ const RepoGrid = ({ repos, page, currentPath }) => {
 	return (
 		<div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
 			{repoElements}
+		</div>
+	);
+};
+
+const DependencyList = ({ repos }) => {
+	return (
+		<div>
+			<div className="flex flex-wrap gap-1 items-center mb-6">
+				<span className="text-sm text-stone-500 dark:text-stone-400">
+					Popular dependencies:
+				</span>
+			</div>
+			<p className="text-center mb-6 text-stone-300 dark:text-stone-600">
+				· · ·
+			</p>
+			{repos.map((repo, index) => (
+				<div key={index} className="mb-6 flex flex-col space-y-0">
+					<h3 className="font-semibold text-stone-900 dark:text-stone-100 overflow-hidden">
+						<a
+							href={`https://github.com/${repo.full_name}`}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="hover:underline"
+						>
+							{repo.full_name}
+						</a>
+					</h3>
+					<span className="font-normal text-sm text-stone-300 dark:text-stone-600">
+						dependencies
+					</span>
+					<ul className="list-none p-0 m-0 overflow-hidden">
+						{repo.dependencies.map((dep, depIndex) => (
+							<li
+								key={depIndex}
+								className="text-sm text-stone-700 dark:text-stone-300 sm:flex sm:items-start"
+							>
+								<span className="flex-shrink-0 mr-1 sm:mr-0">{dep.name}</span>
+								<div className="hidden sm:flex grow flex-col px-1 sm:px-2 pt-2.5 min-w-0">
+									<div className="h-1/2 border-b border-stone-100 dark:border-stone-800" />
+									<div className="h-1/2 border-t border-stone-100 dark:border-stone-800" />
+								</div>
+								{dep.dependency_type === "url" && (
+									<span className="text-sm text-stone-400 dark:text-stone-500 break-all sm:text-right">
+										{dep.url}
+									</span>
+								)}
+								{dep.dependency_type === "path" && (
+									<span className="jext-sm text-stone-400 dark:text-stone-500 sm:text-right">
+										[path] {dep.path}
+									</span>
+								)}
+							</li>
+						))}
+					</ul>
+				</div>
+			))}
 		</div>
 	);
 };
@@ -631,6 +688,39 @@ app.get("/search", (c) => {
 	);
 });
 
+app.get("/dependencies", (c) => {
+	const stmt = db.prepare(serverDependencyQuery);
+	//let deps = stmt.all();
+	//// json parse the deps
+	//deps = JSON.parse(deps[0].dependencies);
+	//console.log(deps);
+
+	let repos = stmt.all();
+	repos = repos.map((repo) => ({
+		...repo,
+		dependencies: JSON.parse(repo.dependencies),
+	}));
+	for (const repo of repos) {
+		console.log(repo.dependencies);
+	}
+
+	logger.info(`server.GET /dependencies - ${repos.length} from db`);
+	return c.html(
+		<BaseLayout>
+			<BaseLayout>
+				<Header />
+				<Hero />
+				<Navigation currentPath={"/dependencies"} query={undefined} />
+				<div className="max-w-5xl mx-auto px-3 py-6">
+					<DependencyList repos={repos} />
+				</div>
+				<Footer />
+			</BaseLayout>
+			,
+		</BaseLayout>,
+	);
+});
+
 export default {
 	port: 8080,
 	fetch: app.fetch,
@@ -638,27 +728,30 @@ export default {
 
 setInterval(() => {
 	logger.flush();
-}, 1000 * 10);
+}, SECONDLY * 10);
 
-fetchRepo(db, "github", "top");
-rebuildFts(db);
-
-setInterval(() => {
-	fetchRepo(db, "github", "all");
-}, MINUTELY * 5);
-
-setInterval(() => {
+if (process.env.IS_PROD) {
+	fetchRepo(db, "github", "top");
 	fetchRepo(db, "codeberg", "top");
-}, HOURLY * 2);
-
-setInterval(() => {
-	fetchBuildZig(db);
-}, MINUTELY);
-
-setInterval(() => {
-	processBuildZig(db);
-}, MINUTELY);
-
-setInterval(() => {
 	rebuildFts(db);
-}, HOURLY * 3);
+
+	setInterval(() => {
+		fetchRepo(db, "github", "all");
+	}, MINUTELY * 5);
+
+	setInterval(() => {
+		fetchRepo(db, "codeberg", "top");
+	}, HOURLY * 2);
+
+	setInterval(() => {
+		fetchBuildZig(db);
+	}, MINUTELY);
+
+	setInterval(() => {
+		processBuildZig(db);
+	}, MINUTELY);
+
+	setInterval(() => {
+		rebuildFts(db);
+	}, HOURLY * 3);
+}

@@ -377,6 +377,28 @@ ORDER BY r.stars DESC
 LIMIT ? OFFSET ?;
 `;
 
+export const serverDependencyQuery = `
+SELECT
+	r.full_name AS full_name,
+	r.platform,
+	json_group_array(
+		json_object(
+			'name', rd.name,
+			'path', rd.path,
+			'dependency_type', rd.dependency_type,
+			'url_dependency_hash', rd.url_dependency_hash,
+			'url', ud.url 
+		)
+	) AS dependencies
+FROM repos AS r
+INNER JOIN repo_dependencies AS rd
+	ON r.id = rd.repo_id
+LEFT JOIN url_dependencies AS ud
+	ON rd.url_dependency_hash = ud.hash
+GROUP BY r.full_name, r.platform
+HAVING COUNT(rd.id) > 0;
+`;
+
 // ----------------------------------------------------------------------------
 // extractors
 
