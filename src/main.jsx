@@ -1126,7 +1126,6 @@ export const rebuildFts = async (conn) => {
 
 		conn.exec("COMMIT;");
 		logger.info("db - worker-rebuild-fts - completed successfully");
-		self.postMessage({ status: "ok" });
 	} catch (e) {
 		conn.exec("ROLLBACK;");
 		logger.error(`db - worker-rebuild-fts - rollback -${e}`);
@@ -1219,7 +1218,6 @@ export const processBuildZig = async (conn) => {
 		}
 		conn.exec("COMMIT");
 		logger.info("db - worker-process-build-zig - completed successfully");
-		self.postMessage({ status: "ok" });
 	} catch (error) {
 		conn.exec("ROLLBACK");
 		logger.error(`db - worker-process-build-zig - Error: ${error}`);
