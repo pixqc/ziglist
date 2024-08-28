@@ -319,6 +319,26 @@ export const initDB = (conn) => {
 		UNIQUE(repo_id, name, dependency_type, path),
 		UNIQUE(repo_id, name, dependency_type, url_dependency_hash)
 	);`);
+	conn.exec(
+		`CREATE INDEX idx_repos_pushed_at_stars_forks ON repos (pushed_at DESC, stars DESC, forks DESC);`,
+	);
+	conn.exec(`CREATE INDEX idx_repos_created_at ON repos (created_at DESC);`);
+	conn.exec(`CREATE INDEX idx_repos_forks ON repos (forks);`);
+	conn.exec(`CREATE INDEX idx_repo_zon_repo_id ON repo_zon (repo_id);`);
+	conn.exec(
+		`CREATE UNIQUE INDEX idx_repo_build_zig_repo_id ON repo_build_zig (repo_id);`,
+	);
+	conn.exec(
+		`CREATE INDEX idx_repo_dependencies_repo_id ON repo_dependencies (repo_id);`,
+	);
+	conn.exec(`
+		CREATE INDEX idx_repos_fullname_nozigbee ON repos(full_name)
+		WHERE full_name NOT LIKE '%zigbee%' COLLATE NOCASE;
+	`);
+	conn.exec(`
+		CREATE INDEX idx_repos_description_zigbee ON repos(description)
+		WHERE description NOT LIKE '%zigbee%' COLLATE NOCASE;
+	`);
 };
 
 // putting these here so i can test them
@@ -1266,11 +1286,13 @@ export const rebuildFts = async (conn) => {
 		conn.exec("BEGIN TRANSACTION;");
 		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
 		conn.exec(`
-			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
+			CREATE VIRTUAL TABLE repos_fts USING fts5(
 				owner, 
 				name,
 				full_name,
-				description
+				description,
+				content='repos',
+				content_rowid='id'
 			);`);
 		conn.exec(`
 			INSERT INTO repos_fts(owner, name, full_name, description)
