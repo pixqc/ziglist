@@ -321,106 +321,83 @@ export const initDB = (conn) => {
 	);`);
 };
 
-/**
- * @param {Database} conn
- * @param {Repo[]} parsed
- */
-const upsertRepos = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT INTO repos (
-			platform, full_name, name, owner, description, homepage, license, 
-			created_at, updated_at, pushed_at, stars, forks, 
-			is_fork, is_archived, default_branch, language
-		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (platform, full_name) DO UPDATE SET
-			name = excluded.name,
-			owner = excluded.owner,
-			description = excluded.description,
-			homepage = excluded.homepage,
-			license = excluded.license,
-			created_at = excluded.created_at,
-			updated_at = excluded.updated_at,
-			pushed_at = excluded.pushed_at,
-			stars = excluded.stars,
-			forks = excluded.forks,
-			is_fork = excluded.is_fork,
-			is_archived = excluded.is_archived,
-			default_branch = excluded.default_branch,
-			language = excluded.language
-		`);
+// putting these here so i can test them
 
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
+export const serverHomeQuery = `
+SELECT 
+	r.*,
+	rz.minimum_zig_version,
+	CASE WHEN rbz.build_zig_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_exists,
+	CASE WHEN rbz.build_zig_zon_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_zon_exists,
+	GROUP_CONCAT(rd.name) AS dependencies
+FROM repos r
+LEFT JOIN repo_zon rz ON r.id = rz.repo_id
+LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
+LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+WHERE r.stars >= 10 AND r.forks >= 10
+	AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+	AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+GROUP BY r.id
+ORDER BY r.pushed_at DESC
+LIMIT ? OFFSET ?;
+`;
 
-		const rows = parsed.map((item) => [
-			item.platform,
-			item.full_name,
-			item.name,
-			item.owner,
-			item.description,
-			item.homepage,
-			item.license,
-			item.created_at,
-			item.updated_at,
-			item.pushed_at,
-			item.stars,
-			item.forks,
-			item.is_fork,
-			item.is_archived,
-			item.default_branch,
-			item.language,
-		]);
+export const serverNewQuery = `
+SELECT 
+	r.*,
+	rz.minimum_zig_version,
+	CASE WHEN rbz.build_zig_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_exists,
+	CASE WHEN rbz.build_zig_zon_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_zon_exists,
+	GROUP_CONCAT(rd.name) AS dependencies
+FROM repos r
+LEFT JOIN repo_zon rz ON r.id = rz.repo_id
+LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
+LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+WHERE r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+	AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+GROUP BY r.id
+ORDER BY r.created_at DESC
+LIMIT ? OFFSET ?;
+`;
 
-		upsertMany(rows);
-		logger.info(`db - upsertZigRepos - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`db - upsertZigRepos - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
+export const serverTopQuery = `
+SELECT 
+	r.*,
+	rz.minimum_zig_version,
+	CASE WHEN rbz.build_zig_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_exists,
+	CASE WHEN rbz.build_zig_zon_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_zon_exists,
+	GROUP_CONCAT(rd.name) AS dependencies
+FROM repos r
+LEFT JOIN repo_zon rz ON r.id = rz.repo_id
+LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
+LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+WHERE r.forks >= 10
+	AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+	AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+GROUP BY r.id
+ORDER BY r.stars DESC
+LIMIT ? OFFSET ?;
+`;
 
-/**
- * @param {Database} conn
- * @param {RepoBuildZig[]} parsed
- */
-const upsertBuildZig = (conn, parsed) => {
-	const stmt = conn.prepare(`
-	INSERT INTO repo_build_zig (
-		repo_id, build_zig_content, build_zig_zon_content, fetched_at
-	) VALUES (?, ?, ?, ?)
-	ON CONFLICT(repo_id) DO UPDATE SET
-		build_zig_content = excluded.build_zig_content,
-		build_zig_zon_content = excluded.build_zig_zon_content,
-		fetched_at = excluded.fetched_at
-	`);
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
-
-		const rows = parsed.map((item) => [
-			item.repo_id,
-			item.build_zig_content,
-			item.build_zig_zon_content,
-			item.fetched_at,
-		]);
-
-		upsertMany(rows);
-		logger.info(`db - upsertBuildZig - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`db - upsertBuildZig - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
+export const serverSearchQuery = `
+SELECT 
+	r.*,
+	rz.minimum_zig_version,
+	CASE WHEN rbz.build_zig_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_exists,
+	CASE WHEN rbz.build_zig_zon_content IS NOT NULL THEN 1 ELSE 0 END AS build_zig_zon_exists,
+	GROUP_CONCAT(rd.name) AS dependencies
+FROM repos_fts fts
+JOIN repos r ON fts.full_name = r.full_name
+LEFT JOIN repo_zon rz ON r.id = rz.repo_id
+LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
+LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
+WHERE repos_fts MATCH ?
+	AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+	AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
+GROUP BY r.id
+ORDER BY r.stars DESC
+LIMIT ? OFFSET ?;
+`;
 
 // ----------------------------------------------------------------------------
 // extractors
@@ -813,7 +790,7 @@ const SpecialCard = () => {
 
 const RepoCard = ({ repo }) => {
 	const shownDeps = 5;
-
+	const deps = repo.dependencies ? repo.dependencies.split(",") : [];
 	const repoUrl =
 		repo.platform === "github"
 			? `https://github.com/${repo.full_name}`
@@ -846,21 +823,21 @@ const RepoCard = ({ repo }) => {
 					repo.language !== null && <Badge value={`lang:${repo.language}`} />}
 				{repo.platform === "codeberg" && <Badge value={"codeberg"} />}
 			</div>
-			{repo.dependencies && repo.dependencies.length > 0 && (
+			{deps.length > 0 && (
 				<div className="flex flex-wrap gap-1 items-center">
 					<span className="text-sm text-stone-500 dark:text-stone-400">
 						Deps:
 					</span>
-					{repo.dependencies.slice(0, shownDeps).map((dep) => (
+					{deps.slice(0, shownDeps).map((dep) => (
 						<Badge value={dep} />
 					))}
-					{repo.dependencies.length > shownDeps && (
+					{deps.length > shownDeps && (
 						<span className="flex text-sm text-stone-500 dark:text-stone-400 grow">
 							<div className="grow flex flex-col pr-3">
 								<div className="h-1/2 border-b border-stone-200 dark:border-stone-700" />
 								<div className="h-1/2 border-t border-stone-200 dark:border-stone-700" />
 							</div>
-							+{repo.dependencies.length - shownDeps} more deps
+							+{deps.length - shownDeps} more deps
 						</span>
 					)}
 				</div>
@@ -1094,42 +1071,69 @@ export const fetchRepo = async (conn, platform, type) => {
 		let items = platform === "codeberg" ? data.data : data.items;
 		items = Array.isArray(items) ? items.filter(Boolean) : [];
 		const parsed = items.map(repoExtractors[platform]);
-		upsertRepos(conn, parsed);
+		const stmt = conn.prepare(`
+			INSERT INTO repos (
+				platform, full_name, name, owner, description, homepage, license, 
+				created_at, updated_at, pushed_at, stars, forks, 
+				is_fork, is_archived, default_branch, language
+			)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (platform, full_name) DO UPDATE SET
+				name = excluded.name,
+				owner = excluded.owner,
+				description = excluded.description,
+				homepage = excluded.homepage,
+				license = excluded.license,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at,
+				pushed_at = excluded.pushed_at,
+				stars = excluded.stars,
+				forks = excluded.forks,
+				is_fork = excluded.is_fork,
+				is_archived = excluded.is_archived,
+				default_branch = excluded.default_branch,
+				language = excluded.language
+			`);
+
+		try {
+			const upsertMany = conn.transaction((data) => {
+				for (const row of data) {
+					stmt.run(row);
+				}
+			});
+
+			const rows = parsed.map((item) => [
+				item.platform,
+				item.full_name,
+				item.name,
+				item.owner,
+				item.description,
+				item.homepage,
+				item.license,
+				item.created_at,
+				item.updated_at,
+				item.pushed_at,
+				item.stars,
+				item.forks,
+				item.is_fork,
+				item.is_archived,
+				item.default_branch,
+				item.language,
+			]);
+
+			upsertMany(rows);
+			logger.info(`db - upsertZigRepos - len ${rows.length}`);
+		} catch (e) {
+			logger.error(`db - upsertZigRepos - ${e}`);
+		} finally {
+			if (stmt) stmt.finalize();
+		}
 		logger.info(
 			`fetch - worker-fetch-repo - ${platform} ${type} - ${items.length} repos - url: ${url}`,
 		);
 		url = getNextURL(response);
 	}
 	logger.info(`fetch - worker-fetch-repo - ${platform} ${type} - completed`);
-};
-
-/**
- * @param {Database} conn
- */
-export const rebuildFts = async (conn) => {
-	logger.info("db - worker-rebuild-fts - started");
-	try {
-		conn.exec("BEGIN TRANSACTION;");
-		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
-		conn.exec(`
-			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
-				owner, 
-				name,
-				full_name,
-				description
-			);`);
-		conn.exec(`
-			INSERT INTO repos_fts(owner, name, full_name, description)
-				SELECT owner, name, full_name, description
-				FROM repos;
-		`);
-
-		conn.exec("COMMIT;");
-		logger.info("db - worker-rebuild-fts - completed successfully");
-	} catch (e) {
-		conn.exec("ROLLBACK;");
-		logger.error(`db - worker-rebuild-fts - rollback -${e}`);
-	}
 };
 
 /**
@@ -1149,8 +1153,37 @@ export const fetchBuildZig = async (conn) => {
 		ORDER BY r.stars DESC
 		LIMIT 50;`);
 	const repos = repoIdStmt.all();
-	const results = await Promise.all(repos.map((repo) => fetchZigContent(repo)));
-	upsertBuildZig(conn, results);
+	const parsed = await Promise.all(repos.map((repo) => fetchZigContent(repo)));
+	const stmt = conn.prepare(`
+		INSERT INTO repo_build_zig (
+			repo_id, build_zig_content, build_zig_zon_content, fetched_at
+		) VALUES (?, ?, ?, ?)
+		ON CONFLICT(repo_id) DO UPDATE SET
+			build_zig_content = excluded.build_zig_content,
+			build_zig_zon_content = excluded.build_zig_zon_content,
+			fetched_at = excluded.fetched_at
+		`);
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const row of data) {
+				stmt.run(row);
+			}
+		});
+
+		const rows = parsed.map((item) => [
+			item.repo_id,
+			item.build_zig_content,
+			item.build_zig_zon_content,
+			item.fetched_at,
+		]);
+
+		upsertMany(rows);
+		logger.info(`db - upsertBuildZig - len ${rows.length}`);
+	} catch (e) {
+		logger.error(`db - upsertBuildZig - ${e}`);
+	} finally {
+		if (stmt) stmt.finalize();
+	}
 };
 
 /**
@@ -1221,5 +1254,34 @@ export const processBuildZig = async (conn) => {
 	} catch (error) {
 		conn.exec("ROLLBACK");
 		logger.error(`db - worker-process-build-zig - Error: ${error}`);
+	}
+};
+
+/**
+ * @param {Database} conn
+ */
+export const rebuildFts = async (conn) => {
+	logger.info("db - worker-rebuild-fts - started");
+	try {
+		conn.exec("BEGIN TRANSACTION;");
+		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
+		conn.exec(`
+			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
+				owner, 
+				name,
+				full_name,
+				description
+			);`);
+		conn.exec(`
+			INSERT INTO repos_fts(owner, name, full_name, description)
+				SELECT owner, name, full_name, description
+				FROM repos;
+		`);
+
+		conn.exec("COMMIT;");
+		logger.info("db - worker-rebuild-fts - completed successfully");
+	} catch (e) {
+		conn.exec("ROLLBACK;");
+		logger.error(`db - worker-rebuild-fts - rollback -${e}`);
 	}
 };

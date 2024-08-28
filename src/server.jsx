@@ -12,6 +12,10 @@ import {
 	Pagination,
 	NoItems,
 	fetchRepo,
+	serverHomeQuery,
+	serverNewQuery,
+	serverTopQuery,
+	serverSearchQuery,
 } from "./main.jsx";
 
 const app = new Hono();
@@ -32,24 +36,7 @@ app.get("/", (c) => {
 	const page = parseInt(c.req.query("page") || "1", 10);
 	const perPage = page === 1 ? 29 : 30;
 	const offset = (page - 1) * perPage;
-	const stmt = db.prepare(`
-		SELECT 
-			r.*,
-			rm.min_zig_version,
-			rm.build_zig_exists,
-			rm.build_zig_zon_exists,
-			GROUP_CONCAT(rd.name) AS dependencies
-		FROM repos r
-		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
-		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
-		WHERE r.stars >= 10 AND r.forks >= 10
-			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
-		GROUP BY r.id
-		ORDER BY r.pushed_at DESC
-		LIMIT ? OFFSET ?
-	`);
-
+	const stmt = db.prepare(serverHomeQuery);
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /?page=${page} - ${repos.length} from db`);
 
@@ -85,23 +72,7 @@ app.get("/new", (c) => {
 	const page = parseInt(c.req.query("page") || "1", 10);
 	const perPage = page === 1 ? 29 : 30;
 	const offset = (page - 1) * perPage;
-	const stmt = db.prepare(`
-		SELECT 
-			r.*,
-			rm.min_zig_version,
-			rm.build_zig_exists,
-			rm.build_zig_zon_exists,
-			GROUP_CONCAT(rd.name) AS dependencies
-		FROM repos r
-		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
-		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
-		WHERE r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
-		GROUP BY r.id
-		ORDER BY r.created_at DESC
-		LIMIT ? OFFSET ?
-	`);
-
+	const stmt = db.prepare(serverNewQuery);
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /new?page=${page} - ${repos.length} from db`);
 
@@ -137,24 +108,7 @@ app.get("/top", (c) => {
 	const page = parseInt(c.req.query("page") || "1", 10);
 	const perPage = page === 1 ? 29 : 30;
 	const offset = (page - 1) * perPage;
-	const stmt = db.prepare(`
-		SELECT 
-			r.*,
-			rm.min_zig_version,
-			rm.build_zig_exists,
-			rm.build_zig_zon_exists,
-			GROUP_CONCAT(rd.name) AS dependencies
-		FROM repos r
-		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
-		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
-		WHERE r.forks >= 10
-			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
-		GROUP BY r.id
-		ORDER BY r.stars DESC
-		LIMIT ? OFFSET ?
-	`);
-
+	const stmt = db.prepare(serverTopQuery);
 	const repos = stmt.all(perPage, offset);
 	logger.info(`server.GET /top?page=${page} - ${repos.length} from db`);
 
@@ -194,25 +148,7 @@ app.get("/search", (c) => {
 	const query = rawQuery.replace(/[-_]/g, " ");
 
 	if (query.trim() === "") return c.redirect("/");
-	const stmt = db.prepare(`
-		SELECT 
-			r.*,
-			rm.min_zig_version,
-			rm.build_zig_exists,
-			rm.build_zig_zon_exists,
-			GROUP_CONCAT(rd.name) AS dependencies
-		FROM repos_fts fts
-		JOIN repos r ON fts.full_name = r.full_name
-		LEFT JOIN repo_metadata rm ON r.id = rm.repo_id
-		LEFT JOIN repo_dependencies rd ON r.id = rd.repo_id
-		WHERE repos_fts MATCH ?
-			AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
-			AND r.description NOT LIKE '%zigbee%' COLLATE NOCASE
-		GROUP BY r.id
-		ORDER BY r.stars DESC
-		LIMIT ? OFFSET ?
-	`);
-
+	const stmt = db.prepare(serverSearchQuery);
 	const repos = stmt.all(query, perPage, offset);
 	logger.info(
 		`server.GET /search?page=${page} - query: ${rawQuery} - ${repos.length} from db`,
@@ -259,7 +195,7 @@ setInterval(() => {
 	logger.flush();
 }, 1000 * 10);
 
-fetchRepo(db, "github", "top");
+//fetchRepo(db, "github", "top");
 
 //
 //workerFetchRepo.postMessage({
