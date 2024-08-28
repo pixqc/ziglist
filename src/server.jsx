@@ -11,7 +11,7 @@ import {
 	fetchBuildZig,
 	processBuildZig,
 	rebuildFts,
-} from "./main.jsx";
+} from "./main.js";
 
 const SECONLY = 1000;
 const MINUTELY = 60 * SECONLY;

@@ -277,23 +277,24 @@ export const initDB = (conn) => {
 		UNIQUE(repo_id, name, dependency_type, url_dependency_hash)
 	);`);
 	conn.exec(
-		`CREATE INDEX idx_repos_pushed_at_stars_forks ON repos (pushed_at DESC, stars DESC, forks DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_repos_created_at ON repos (created_at DESC);`,
 	);
-	conn.exec(`CREATE INDEX idx_repos_created_at ON repos (created_at DESC);`);
-	conn.exec(`CREATE INDEX idx_repos_forks ON repos (forks);`);
-	conn.exec(`CREATE INDEX idx_repo_zon_repo_id ON repo_zon (repo_id);`);
+	conn.exec(`CREATE INDEX IF NOT EXISTS idx_repos_forks ON repos (forks);`);
 	conn.exec(
-		`CREATE UNIQUE INDEX idx_repo_build_zig_repo_id ON repo_build_zig (repo_id);`,
+		`CREATE INDEX IF NOT EXISTS idx_repo_zon_repo_id ON repo_zon (repo_id);`,
 	);
 	conn.exec(
-		`CREATE INDEX idx_repo_dependencies_repo_id ON repo_dependencies (repo_id);`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_repo_build_zig_repo_id ON repo_build_zig (repo_id);`,
+	);
+	conn.exec(
+		`CREATE INDEX IF NOT EXISTS idx_repo_dependencies_repo_id ON repo_dependencies (repo_id);`,
 	);
 	conn.exec(`
-		CREATE INDEX idx_repos_fullname_nozigbee ON repos(full_name)
+		CREATE INDEX IF NOT EXISTS idx_repos_fullname_nozigbee ON repos(full_name)
 		WHERE full_name NOT LIKE '%zigbee%' COLLATE NOCASE;
 	`);
 	conn.exec(`
-		CREATE INDEX idx_repos_description_zigbee ON repos(description)
+		CREATE INDEX IF NOT EXISTS idx_repos_description_zigbee ON repos(description)
 		WHERE description NOT LIKE '%zigbee%' COLLATE NOCASE;
 	`);
 };
@@ -789,7 +790,7 @@ export const processBuildZig = async (conn) => {
 				INSERT OR REPLACE INTO repo_zon (repo_id, name, version, minimum_zig_version, paths)
 				VALUES (?, ?, ?, ?, ?)
 			`);
-			const pathsString = paths.join(",");
+			const pathsString = paths !== undefined ? paths.join(",") : "";
 			metadataStmt.run(
 				row.repo_id,
 				name,
