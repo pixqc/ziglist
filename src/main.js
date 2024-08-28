@@ -826,7 +826,7 @@ export const processBuildZig = async (conn) => {
 				VALUES (?, ?, ?)
 			`);
 			for (const urlDep of urlDeps) {
-				urlDepStmt.run(row.repo_id, urlDep.url, urlDep.hash);
+				urlDepStmt.run(urlDep.hash, urlDep.name, urlDep.url);
 			}
 
 			const depStmt = conn.prepare(`
