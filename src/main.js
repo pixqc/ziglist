@@ -121,6 +121,7 @@ export const zon2json = (zon) => {
  * @returns {Promise<RepoBuildZig>}
  */
 export const fetchBuildZig = async (repo) => {
+	logger.info(`fetch - fetchBuildZig - ${repo.full_name}`);
 	const zigURL = getZigURL(repo);
 	const zonURL = getZonURL(repo);
 	const [zigResponse, zonResponse] = await Promise.all([
@@ -131,13 +132,9 @@ export const fetchBuildZig = async (repo) => {
 		repo_id: repo.id,
 		fetched_at: Math.floor(Date.now() / 1000),
 		build_zig_content:
-			zigResponse.status === 200
-				? (await zigResponse.text()).slice(0, 10)
-				: null,
+			zigResponse.status === 200 ? await zigResponse.text() : null,
 		build_zig_zon_content:
-			zonResponse.status === 200
-				? (await zonResponse.text()).slice(0, 10)
-				: null,
+			zonResponse.status === 200 ? await zonResponse.text() : null,
 	};
 };
 
@@ -177,29 +174,6 @@ export const formatNumberK = (num) => {
 	if (num < 1000) return num.toString();
 	const thousands = num / 1000;
 	return (Math.floor(thousands * 10) / 10).toFixed(1) + "k";
-};
-
-/**
- * Some queries are done where it's between two dates, GitHub only returns
- * 1000 items for a query, this between two date condition makes it possible
- * to query more than 1000 repos
- *
- * @param {Date} start
- * @param {Date} end
- * @returns {string}
- */
-const makeDateRange = (start, end) =>
-	`${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
-
-/**
- * @param {Date} date
- * @param {number} months
- * @returns {Date}
- */
-const addMonths = (date, months) => {
-	const newDate = new Date(date);
-	newDate.setMonth(newDate.getMonth() + months);
-	return newDate;
 };
 
 /**
@@ -244,22 +218,24 @@ export const getNextURL = (response) => {
  * @property {boolean} is_archived
  */
 
-/** @typedef {Object} RepoBuildZig
+/**
+ * @typedef {Object} RepoBuildZig
  * @property {number} repo_id
  * @property {string | null} build_zig_content
  * @property {string | null} build_zig_zon_content
  * @property {number} fetched_at
  */
 
-/** @typedef {Object} RepoDependency
- * @property {string} full_name
+/**
+ * @typedef {Object} RepoDependency
  * @property {string} name
  * @property {string} dependency_type
  * @property {string | null} path
  * @property {string | null} url_dependency_hash
  */
 
-/** @typedef {Object} UrlDependency
+/**
+ * @typedef {Object} UrlDependency
  * @property {string} hash
  * @property {string} name
  * @property {string} url
@@ -291,6 +267,17 @@ export const initDB = (conn) => {
 		is_fork BOOLEAN,
 		is_archived BOOLEAN,
 		UNIQUE (platform, full_name)
+	);`);
+	conn.exec(`
+	CREATE TABLE IF NOT EXISTS repo_zon (
+		repo_id INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		minimum_zig_version TEXT NULL,
+		paths TEXT NOT NULL,
+		FOREIGN KEY (repo_id) REFERENCES repos(id) 
+			ON DELETE CASCADE, 
+		UNIQUE(repo_id, name, version)
 	);`);
 	conn.exec(`
 	CREATE TABLE IF NOT EXISTS repo_build_zig (
@@ -426,72 +413,73 @@ export const upsertBuildZig = (conn, parsed) => {
 	}
 };
 
-/**
- * @param {Database} conn
- * @param {UrlDependency[]} parsed
- */
-export const insertUrlDependencies = (conn, parsed) => {
-	const stmt = conn.prepare(`
-		INSERT OR IGNORE INTO url_dependencies (hash, name, url)
-		VALUES (?, ?, ?)`);
-	try {
-		const insertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
-			}
-		});
-		const rows = parsed.map((item) => [item.hash, item.name, item.url]);
-		insertMany(rows);
-		logger.info(`db - insertUrlDependencies - len ${rows.length}`);
-	} catch (e) {
-		logger.error(`db - insertUrlDependencies - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
-
-/**
- * @param {Database} conn
- * @param {RepoDependency[]} parsed
- * @param {number} repo_id
- */
-export const upsertDependencies = (conn, parsed, repo_id) => {
-	const stmt = conn.prepare(`
-		INSERT INTO repo_dependencies (
-			repo_id, name, dependency_type, path, url_dependency_hash
-		) VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT (repo_id, name, dependency_type, path) 
-		DO UPDATE SET
-			url_dependency_hash = excluded.url_dependency_hash
-		ON CONFLICT (repo_id, name, dependency_type, url_dependency_hash) 
-		DO UPDATE SET
-			path = excluded.path`);
-	try {
-		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(
-					repo_id,
-					row.name,
-					row.dependency_type,
-					row.dependency_type === "path" ? row.path : null,
-					row.dependency_type === "url" ? row.url_dependency_hash : null,
-				);
-			}
-		});
-		upsertMany(parsed);
-		logger.info(`db - upsertDependencies - len ${parsed.length}`);
-	} catch (e) {
-		logger.error(`db - upsertDependencies - ${e}`);
-	} finally {
-		if (stmt) stmt.finalize();
-	}
-};
+///**
+// * @param {Database} conn
+// * @param {UrlDependency[]} parsed
+// */
+//export const insertUrlDependencies = (conn, parsed) => {
+//	const stmt = conn.prepare(`
+//		INSERT OR IGNORE INTO url_dependencies (hash, name, url)
+//		VALUES (?, ?, ?)`);
+//	try {
+//		const insertMany = conn.transaction((data) => {
+//			for (const row of data) {
+//				stmt.run(row);
+//			}
+//		});
+//		const rows = parsed.map((item) => [item.hash, item.name, item.url]);
+//		insertMany(rows);
+//		logger.info(`db - insertUrlDependencies - len ${rows.length}`);
+//	} catch (e) {
+//		logger.error(`db - insertUrlDependencies - ${e}`);
+//	} finally {
+//		if (stmt) stmt.finalize();
+//	}
+//};
+//
+///**
+// * @param {Database} conn
+// * @param {RepoDependency[]} parsed
+// * @param {number} repo_id
+// */
+//export const upsertDependencies = (conn, parsed, repo_id) => {
+//	const stmt = conn.prepare(`
+//		INSERT INTO repo_dependencies (
+//			repo_id, name, dependency_type, path, url_dependency_hash
+//		) VALUES (?, ?, ?, ?, ?)
+//		ON CONFLICT (repo_id, name, dependency_type, path)
+//		DO UPDATE SET
+//			url_dependency_hash = excluded.url_dependency_hash
+//		ON CONFLICT (repo_id, name, dependency_type, url_dependency_hash)
+//		DO UPDATE SET
+//			path = excluded.path`);
+//	try {
+//		const upsertMany = conn.transaction((data) => {
+//			for (const row of data) {
+//				stmt.run(
+//					repo_id,
+//					row.name,
+//					row.dependency_type,
+//					row.dependency_type === "path" ? row.path : null,
+//					row.dependency_type === "url" ? row.url_dependency_hash : null,
+//				);
+//			}
+//		});
+//		upsertMany(parsed);
+//		logger.info(`db - upsertDependencies - len ${parsed.length}`);
+//	} catch (e) {
+//		logger.error(`db - upsertDependencies - ${e}`);
+//	} finally {
+//		if (stmt) stmt.finalize();
+//	}
+//};
 
 /**
  * @param {Database} conn
  */
 export const rebuildFts = (conn) => {
 	try {
+		conn.exec("BEGIN TRANSACTION;");
 		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
 		conn.exec(`
 			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
@@ -505,9 +493,73 @@ export const rebuildFts = (conn) => {
 				SELECT owner, name, full_name, description
 				FROM repos;
 		`);
-		logger.info("db - rebuildFts");
+
+		conn.exec("COMMIT;");
+		logger.info("db - rebuildFts - completed successfully");
 	} catch (e) {
-		logger.error(`db - rebuildFts - ${e}`);
+		conn.exec("ROLLBACK;");
+		logger.error(`db - rebuildFts - rollback -${e}`);
+	}
+};
+
+/**
+ * @param {Database} conn
+ */
+export const processBuildZig = (conn) => {
+	const stmt = conn.prepare(`
+		SELECT build_zig_zon_content, repo_id 
+		FROM repo_build_zig
+		WHERE build_zig_zon_content IS NOT NULL
+	`);
+	const rows = stmt.all();
+	conn.exec("BEGIN TRANSACTION");
+
+	try {
+		for (const row of rows) {
+			const parsed = extractZon(
+				JSON.parse(zon2json(row.build_zig_zon_content)),
+			);
+
+			const metadataStmt = conn.prepare(`
+				INSERT OR REPLACE INTO repo_zon (repo_id, name, version, minimum_zig_version, paths)
+				VALUES (?, ?, ?, ?, ?)
+			`);
+			const pathsString = parsed.paths.join(",");
+			metadataStmt.run(
+				row.repo_id,
+				parsed.name,
+				parsed.version,
+				parsed.minimum_zig_version,
+				pathsString,
+			);
+
+			const urlDepStmt = conn.prepare(`
+				INSERT OR REPLACE INTO url_dependencies (hash, name, url)
+				VALUES (?, ?, ?)
+			`);
+			for (const urlDep of parsed.urlDeps) {
+				urlDepStmt.run(row.repo_id, urlDep.url, urlDep.hash);
+			}
+
+			const depStmt = conn.prepare(`
+				INSERT OR REPLACE INTO repo_dependencies (repo_id, name, dependency_type, path, url_dependency_hash)
+				VALUES (?, ?, ?, ?, ?)
+			`);
+			for (const dep of parsed.deps) {
+				depStmt.run(
+					row.repo_id,
+					dep.name,
+					dep.dependency_type,
+					dep.dependency_type === "path" ? dep.path : null,
+					dep.dependency_type === "url" ? dep.url_dependency_hash : null,
+				);
+			}
+		}
+		conn.exec("COMMIT");
+		logger.info("db - processBuildZig - completed successfully");
+	} catch (error) {
+		conn.exec("ROLLBACK");
+		logger.error(`db - processBuildZig - Error: ${error}`);
 	}
 };
 
@@ -603,7 +655,7 @@ const transformDependencies = (dependencies) => {
  * @param {Object} data - return of JSON.parse(zon2json(zon))
  * @param {string} data.name
  * @param {string} data.version
- * @param {string | undefined} data.minimum_zig_version
+ * @param {string | null} data.minimum_zig_version
  * @param {string[]} data.paths
  * @param {Object.<string, any>} [data.dependencies]
  * @returns {{
@@ -683,6 +735,17 @@ export const getTopRepoURL = (platform) => {
  * to make sure the query returns <1k items per url
  */
 const createDateGenerator = () => {
+	/**
+	 * @param {Date} date
+	 * @param {number} months
+	 * @returns {Date}
+	 */
+	const addMonths = (date, months) => {
+		const newDate = new Date(date);
+		newDate.setMonth(newDate.getMonth() + months);
+		return newDate;
+	};
+
 	// first index: zig init date,
 	// commit 8e08cf4bec80b87a7a22a18086a3db5c2c0f1772
 	const dates = [
@@ -738,6 +801,18 @@ export const dateGenerator = createDateGenerator();
  * @returns {string}
  */
 export const getAllRepoURL = (platform) => {
+	/**
+	 * Some queries are done where it's between two dates, GitHub only returns
+	 * 1000 items for a query, this between two date condition makes it possible
+	 * to query more than 1000 repos
+	 *
+	 * @param {Date} start
+	 * @param {Date} end
+	 * @returns {string}
+	 */
+	const makeDateRange = (start, end) =>
+		`${start.toISOString().slice(0, 19)}Z..${end.toISOString().slice(0, 19)}Z`;
+
 	if (platform === "github") {
 		const base = "https://api.github.com/search/repositories";
 		const { start, end } = dateGenerator().next().value;
