@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { appendFileSync } from "node:fs";
 
 // ----------------------------------------------------------------------------
 // utils
@@ -15,13 +14,9 @@ import { appendFileSync } from "node:fs";
  *   warn: (message: string, data?: any) => void,
  *   error: (message: string, data?: any) => void,
  *   fatal: (message: string, data?: any) => void,
- *   flush: () => Promise<void>
  * }} A logger object with methods for each log level and a flush method.
  */
 const createLogger = () => {
-	/** @type {string[]} */
-	let buffer = [];
-
 	const LOG_MAP = {
 		trace: 10,
 		debug: 20,
@@ -47,7 +42,6 @@ const createLogger = () => {
 		};
 		if (level === "error") console.error(JSON.stringify(logEntry));
 		else console.log(JSON.stringify(logEntry));
-		buffer.push(JSON.stringify(logEntry));
 	};
 
 	return {
@@ -57,13 +51,6 @@ const createLogger = () => {
 		warn: (message, data) => log("warn", message, data),
 		error: (message, data) => log("error", message, data),
 		fatal: (message, data) => log("fatal", message, data),
-
-		async flush() {
-			if (buffer.length === 0) return;
-			const bufStr = buffer.join("\n") + "\n";
-			appendFileSync("log.txt", bufStr);
-			buffer = [];
-		},
 	};
 };
 
@@ -79,7 +66,6 @@ export const logger = createLogger();
  */
 const fatal = (message, data) => {
 	logger.fatal(message, data);
-	logger.flush();
 	process.exit(1);
 };
 
@@ -387,7 +373,7 @@ SELECT
 			'path', rd.path,
 			'dependency_type', rd.dependency_type,
 			'url_dependency_hash', rd.url_dependency_hash,
-			'url', ud.url 
+			'url', ud.url
 		)
 	) AS dependencies
 FROM repos AS r
@@ -861,7 +847,7 @@ export const rebuildFts = async (conn) => {
 		conn.exec(`DROP TABLE IF EXISTS repos_fts;`);
 		conn.exec(`
 			CREATE VIRTUAL TABLE IF NOT EXISTS repos_fts USING fts5(
-				owner, 
+				owner,
 				name,
 				full_name,
 				description,
