@@ -1067,41 +1067,32 @@ const SchemaRepoCodeberg = z.object({
 const zigReposInsert = (parsed) => {
   const stmt = db.prepare(`
     INSERT INTO zig_repos (
-        full_name, name, owner, description, homepage, license, 
-        created_at, updated_at, pushed_at, stars, forks, 
-        is_fork, default_branch, language,
-        min_zig_version, build_zig_exists, build_zig_fetched_at,
-        build_zig_zon_exists, build_zig_zon_fetched_at
+      full_name, name, owner, description, homepage, license, 
+      created_at, updated_at, pushed_at, stars, forks, 
+      is_fork, default_branch, language,
+      min_zig_version, build_zig_exists, build_zig_fetched_at,
+      build_zig_zon_exists, build_zig_zon_fetched_at
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
     ON CONFLICT(full_name) DO UPDATE SET
-        name = excluded.name,
-        owner = excluded.owner,
-        description = excluded.description,
-        homepage = excluded.homepage,
-        license = excluded.license,
-        created_at = excluded.created_at,
-        updated_at = excluded.updated_at,
-        pushed_at = excluded.pushed_at,
-        stars = excluded.stars,
-        forks = excluded.forks,
-        is_fork = excluded.is_fork,
-        default_branch = excluded.default_branch,
-        language = excluded.language;
-  `);
-  const ftsDeleteStmt = db.prepare(`
-    DELETE FROM zig_repos_fts WHERE full_name = ?;
-  `);
-  const ftsInsertStmt = db.prepare(`
-    INSERT INTO zig_repos_fts(full_name, name, owner, description)
-    VALUES (?, ?, ?, ?);
+      name = excluded.name,
+      owner = excluded.owner,
+      description = excluded.description,
+      homepage = excluded.homepage,
+      license = excluded.license,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      pushed_at = excluded.pushed_at,
+      stars = excluded.stars,
+      forks = excluded.forks,
+      is_fork = excluded.is_fork,
+      default_branch = excluded.default_branch,
+      language = excluded.language;
   `);
   try {
     const upsertMany = db.transaction((data) => {
       for (const row of data) {
         stmt.run(row);
-        ftsDeleteStmt.run(row[0]);
-        ftsInsertStmt.run(row[0], row[1], row[2], row[3]);
       }
     });
     const rows = parsed.map((item) => [
@@ -1127,6 +1118,22 @@ const zigReposInsert = (parsed) => {
   } finally {
     if (stmt) stmt.finalize();
   }
+};
+
+const rebuildFts = () => {
+  db.exec(`DROP TABLE IF EXISTS zig_repos_fts;`);
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
+      owner, 
+      name,
+      full_name,
+      description
+    );`);
+  db.exec(`
+    INSERT INTO zig_repos_fts(owner, name, full_name, description)
+      SELECT owner, name, full_name, description
+      FROM zig_repos;
+  `);
 };
 
 /**
@@ -1680,6 +1687,7 @@ const excludedRepos = [
   "ee7/binary-size",
   "codingonion/hello-algo-rust",
   "ratfactor/ziglings", // only show the codeberg one
+  "ziglings-org/exercises", // only show the codeberg one
 ];
 
 // some c/cpp projects use build.zig but doesn't mention zig in description
@@ -1739,7 +1747,7 @@ const R2 = new S3Client({
 
 // R2 healthcheck
 if (IS_PROD) {
-  const sqliteBackup = "backup-2024-08-16T00_00_00.002Z.sqlite";
+  const sqliteBackup = "backup-2024-08-19T00_00_00.002Z.sqlite";
   const resultR2 = await R2.getObject(sqliteBackup);
   try {
     const localOutFile = await Deno.open("db.sqlite", {
@@ -1798,18 +1806,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_zig_repos_created_at_full_name ON zig_repos(created_at DESC, full_name);
   CREATE INDEX IF NOT EXISTS idx_zig_repos_forks_stars ON zig_repos(forks, stars DESC);
   CREATE INDEX IF NOT EXISTS idx_zig_repo_dependencies_full_name ON zig_repo_dependencies (full_name);
-
-  -- Full text search
-  DROP TABLE IF EXISTS zig_repos_fts;
-  CREATE VIRTUAL TABLE IF NOT EXISTS zig_repos_fts USING fts5(
-    owner, 
-    name,
-    full_name,
-    description
-  );
-  INSERT INTO zig_repos_fts(full_name, name, owner, description)
-    SELECT full_name, name, owner, description
-    FROM zig_repos;
 `);
 
 // older Zig projects don't use zon files to list their dependencies
@@ -1968,8 +1964,10 @@ const port = 8080;
 logger.info(`listening on http://localhost:${port}`);
 Deno.serve({ port }, app.fetch);
 
+rebuildFts();
 updateIncludedRepos();
 zigBuildFetchInsert();
+zigReposFetchInsert("top");
 zigReposFetchInsert("codeberg:all");
 Deno.cron("zigBuildFetchInsert", "* * * * *", zigBuildFetchInsert);
 Deno.cron("updateIncludedRepos", "0 * * * *", updateIncludedRepos);
