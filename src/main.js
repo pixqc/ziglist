@@ -1,5 +1,4 @@
 import { Database } from "bun:sqlite";
-import { appendFileSync } from "node:fs";
 
 // ----------------------------------------------------------------------------
 // utils
@@ -51,24 +50,14 @@ const createLogger = () => {
 		info: (message, data) => log("info", message, data),
 		warn: (message, data) => log("warn", message, data),
 		error: (message, data) => log("error", message, data),
-		fatal: (message, data) => log("fatal", message, data),
+		fatal: (message, data) => {
+			log("fatal", message, data);
+			process.exit(1);
+		},
 	};
 };
 
 export const logger = createLogger();
-
-/**
- * A wise man once said:
- * Runtime crashes are better than bugs.
- * Compile errors are better than runtime crashes.
- *
- * @param {string} message - Error message to log.
- * @param {Object} [data] - Additional data to log (optional).
- */
-const fatal = (message, data) => {
-	logger.fatal(message, data);
-	process.exit(1);
-};
 
 /**
  * @param {string} dateString
@@ -487,7 +476,7 @@ const getBuildZigURL = (filename) => (repo) => {
 	} else if (repo.platform === "codeberg") {
 		return `https://codeberg.org/${repo.full_name}/raw/branch/${repo.default_branch}/${filename}`;
 	}
-	fatal(`getBuildZigURL - invalid platform ${repo.platform}`);
+	logger.fatal(`getBuildZigURL - invalid platform ${repo.platform}`);
 	return ""; // unreachable
 };
 
@@ -508,7 +497,7 @@ const getTopRepoURL = (platform) => {
 		const query = "zig";
 		return `${base}?q=${encodeURIComponent(query)}&includeDesc=true&page=1&limit=50`;
 	}
-	fatal(`getRepoURL - invalid platform ${platform}`);
+	logger.fatal(`getRepoURL - invalid platform ${platform}`);
 	return ""; // unreachable
 };
 
@@ -603,14 +592,14 @@ const getAllRepoURL = (platform) => {
 		return `${base}?q=${encodeURIComponent(query)}&per_page=100&page=1`;
 	}
 	// codeberg's top url contain all repos, it's unused here
-	fatal(`getRepoURL - invalid platform ${platform}`);
+	logger.fatal(`getRepoURL - invalid platform ${platform}`);
 	return ""; // unreachable
 };
 
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
-if (!GITHUB_API_KEY) fatal("GITHUB_API_KEY is not set");
+if (!GITHUB_API_KEY) logger.fatal("GITHUB_API_KEY is not set");
 const CODEBERG_API_KEY = process.env.CODEBERG_API_KEY;
-if (!CODEBERG_API_KEY) fatal("CODEBERG_API_KEY is not set");
+if (!CODEBERG_API_KEY) logger.fatal("CODEBERG_API_KEY is not set");
 
 export const headers = {
 	github: {
