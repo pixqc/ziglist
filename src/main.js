@@ -15,13 +15,9 @@ import { appendFileSync } from "node:fs";
  *   warn: (message: string, data?: any) => void,
  *   error: (message: string, data?: any) => void,
  *   fatal: (message: string, data?: any) => void,
- *   flush: () => Promise<void>
  * }} A logger object with methods for each log level and a flush method.
  */
 const createLogger = () => {
-	/** @type {string[]} */
-	let buffer = [];
-
 	const LOG_MAP = {
 		trace: 10,
 		debug: 20,
@@ -47,7 +43,6 @@ const createLogger = () => {
 		};
 		if (level === "error") console.error(JSON.stringify(logEntry));
 		else console.log(JSON.stringify(logEntry));
-		buffer.push(JSON.stringify(logEntry));
 	};
 
 	return {
@@ -57,13 +52,6 @@ const createLogger = () => {
 		warn: (message, data) => log("warn", message, data),
 		error: (message, data) => log("error", message, data),
 		fatal: (message, data) => log("fatal", message, data),
-
-		async flush() {
-			if (buffer.length === 0) return;
-			const bufStr = buffer.join("\n") + "\n";
-			appendFileSync("log.txt", bufStr);
-			buffer = [];
-		},
 	};
 };
 
@@ -79,7 +67,6 @@ export const logger = createLogger();
  */
 const fatal = (message, data) => {
 	logger.fatal(message, data);
-	logger.flush();
 	process.exit(1);
 };
 
@@ -120,8 +107,8 @@ const fetchZigContent = async (repo) => {
 	const zigURL = getZigURL(repo);
 	const zonURL = getZonURL(repo);
 	const [zigResponse, zonResponse] = await Promise.all([
-		fetch(zigURL, { headers: headers[repo.platform] }),
-		fetch(zonURL, { headers: headers[repo.platform] }),
+		fetch(zigURL),
+		fetch(zonURL),
 	]);
 	return {
 		repo_id: repo.id,
