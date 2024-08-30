@@ -86,27 +86,27 @@ const zon2json = (zon) => {
 		});
 };
 
-/**
- * @param {RepoName} repo
- * @returns {Promise<RepoBuildZig>}
- */
-const fetchZigContent = async (repo) => {
-	logger.info(`fetch - fetchBuildZig - ${repo.full_name}`);
-	const zigURL = getZigURL(repo);
-	const zonURL = getZonURL(repo);
-	const [zigResponse, zonResponse] = await Promise.all([
-		fetch(zigURL),
-		fetch(zonURL),
-	]);
-	return {
-		repo_id: repo.id,
-		fetched_at: Math.floor(Date.now() / 1000),
-		build_zig_content:
-			zigResponse.status === 200 ? await zigResponse.text() : null,
-		build_zig_zon_content:
-			zonResponse.status === 200 ? await zonResponse.text() : null,
-	};
-};
+///**
+// * @param {RepoName} repo
+// * @returns {Promise<RepoBuildZig>}
+// */
+//const fetchZigContent = async (repo) => {
+//	logger.info(`fetch - fetchBuildZig - ${repo.full_name}`);
+//	const zigURL = getZigURL(repo);
+//	const zonURL = getZonURL(repo);
+//	const [zigResponse, zonResponse] = await Promise.all([
+//		fetch(zigURL),
+//		fetch(zonURL),
+//	]);
+//	return {
+//		repo_id: repo.id,
+//		fetched_at: Math.floor(Date.now() / 1000),
+//		build_zig_content:
+//			zigResponse.status === 200 ? await zigResponse.text() : null,
+//		build_zig_zon_content:
+//			zonResponse.status === 200 ? await zonResponse.text() : null,
+//	};
+//};
 
 /**
  * @param {Response} response
@@ -624,102 +624,103 @@ const getAllRepoURL = (platform) => {
 };
 
 // ----------------------------------------------------------------------------
-// workers
+// workers (fetch+insert)
 
-/**
- * @param {Database} conn
- * @param {'github' | 'codeberg'} platform
+/** @param {'github' | 'codeberg'} platform
  * @param {'top' | 'all'} type
+ * @returns {Promise<Repo[]>}
  */
-export const fetchRepo = async (conn, platform, type) => {
-	logger.info(`fetch - worker-fetch-repo - ${platform} ${type}`);
-
-	/** @type {string | undefined} */
-	let url = type === "top" ? getTopRepoURL(platform) : getAllRepoURL(platform);
-	while (url) {
-		const response = await fetch(url, { headers: headers[platform] });
-		if (response.status !== 200) {
-			logger.error(
-				`fetch - worker-fetch-repo - ${platform} ${type} - HTTP ${response.status}`,
-			);
-			break;
-		}
-		const data = await response.json();
-		let items = platform === "codeberg" ? data.data : data.items;
-		items = Array.isArray(items) ? items.filter(Boolean) : [];
-		const parsed = items.map(repoExtractors[platform]);
-		const stmt = conn.prepare(`
-			INSERT INTO repos (
-				platform, full_name, name, owner, description, homepage, license, 
-				created_at, updated_at, pushed_at, stars, forks, 
-				is_fork, is_archived, default_branch, language
-			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (platform, full_name) DO UPDATE SET
-				name = excluded.name,
-				owner = excluded.owner,
-				description = excluded.description,
-				homepage = excluded.homepage,
-				license = excluded.license,
-				created_at = excluded.created_at,
-				updated_at = excluded.updated_at,
-				pushed_at = excluded.pushed_at,
-				stars = excluded.stars,
-				forks = excluded.forks,
-				is_fork = excluded.is_fork,
-				is_archived = excluded.is_archived,
-				default_branch = excluded.default_branch,
-				language = excluded.language
-			`);
-
-		try {
-			const upsertMany = conn.transaction((data) => {
-				for (const row of data) {
-					stmt.run(row);
-				}
-			});
-
-			const rows = parsed.map((item) => [
-				item.platform,
-				item.full_name,
-				item.name,
-				item.owner,
-				item.description,
-				item.homepage,
-				item.license,
-				item.created_at,
-				item.updated_at,
-				item.pushed_at,
-				item.stars,
-				item.forks,
-				item.is_fork,
-				item.is_archived,
-				item.default_branch,
-				item.language,
-			]);
-
-			upsertMany(rows);
-			logger.info(`db - upsertZigRepos - len ${rows.length}`);
-		} catch (e) {
-			logger.error(`db - upsertZigRepos - ${e}`);
-		} finally {
-			if (stmt) stmt.finalize();
-		}
-		logger.info(
-			`fetch - worker-fetch-repo - ${platform} ${type} - ${items.length} repos - url: ${url}`,
+const fetchRepos = async (platform, type) => {
+	logger.info(`fetch - fetchRepos - ${platform} ${type}`);
+	const url =
+		type === "top" ? getTopRepoURL(platform) : getAllRepoURL(platform);
+	const response = await fetch(url, { headers: headers[platform] });
+	if (response.status !== 200) {
+		logger.error(
+			`fetch - fetchRepos - ${platform} ${type} - HTTP ${response.status}`,
 		);
-		url = getNextURL(response);
+		return [];
 	}
-	logger.info(`fetch - worker-fetch-repo - ${platform} ${type} - completed`);
+	const data = await response.json();
+	let items = platform === "codeberg" ? data.data : data.items;
+	items = Array.isArray(items) ? items.filter(Boolean) : [];
+	const parsed = items.map(repoExtractors[platform]);
+	logger.info(
+		`fetch - fetchRepos - ${platform} ${type} - count ${parsed.length}`,
+	);
+	return parsed;
 };
 
 /**
  * @param {Database} conn
+ * @param {Repo[]} parsed
  */
-export const fetchBuildZig = async (conn) => {
+const upsertRepos = async (conn, parsed) => {
+	const stmt = conn.prepare(`
+		INSERT INTO repos (
+			platform, full_name, name, owner, description, homepage, license, 
+			created_at, updated_at, pushed_at, stars, forks, 
+			is_fork, is_archived, default_branch, language
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (platform, full_name) DO UPDATE SET
+			name = excluded.name,
+			owner = excluded.owner,
+			description = excluded.description,
+			homepage = excluded.homepage,
+			license = excluded.license,
+			created_at = excluded.created_at,
+			updated_at = excluded.updated_at,
+			pushed_at = excluded.pushed_at,
+			stars = excluded.stars,
+			forks = excluded.forks,
+			is_fork = excluded.is_fork,
+			is_archived = excluded.is_archived,
+			default_branch = excluded.default_branch,
+			language = excluded.language
+	`);
+
+	try {
+		const upsertMany = conn.transaction((data) => {
+			for (const item of data) {
+				stmt.run(
+					item.platform,
+					item.full_name,
+					item.name,
+					item.owner,
+					item.description,
+					item.homepage,
+					item.license,
+					item.created_at,
+					item.updated_at,
+					item.pushed_at,
+					item.stars,
+					item.forks,
+					item.is_fork,
+					item.is_archived,
+					item.default_branch,
+					item.language,
+				);
+			}
+		});
+
+		upsertMany(parsed);
+		logger.info(`db - upsertRepos - count ${parsed.length}`);
+	} catch (e) {
+		logger.error(`db - upsertRepos - ${e}`);
+	} finally {
+		stmt.finalize();
+	}
+};
+
+/**
+ * @param {Database} conn
+ * @returns {Promise<RepoName[]>}
+ */
+const getOutdatedZigBuilds = async (conn) => {
 	// rate limit: 5000 requests per hour, 83/min
 	// 41 because fetching both build.zig and build.zig.zon, 41 * 2 = 82
-	const repoIdStmt = conn.prepare(`
+	const stmt = conn.prepare(`
 		SELECT r.id, r.full_name, r.default_branch, r.platform
 		FROM repos r
 		LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
@@ -731,8 +732,39 @@ export const fetchBuildZig = async (conn) => {
 		AND (r.description IS NULL OR r.description NOT LIKE '%zigbee%' COLLATE NOCASE)
 		ORDER BY r.stars DESC
 		LIMIT 41;`);
-	const repos = repoIdStmt.all();
-	const parsed = await Promise.all(repos.map((repo) => fetchZigContent(repo)));
+	const repos = stmt.all();
+	logger.info(`db - getOutdatedZigBuilds - count ${repos.length}`);
+	return repos;
+};
+
+/**
+ * @param {Database} conn
+ * @returns {Promise<RepoBuildZig[]>}
+ */
+const fetchBuildZigs = async (conn) => {
+	const repos = await getOutdatedZigBuilds(conn);
+	return await Promise.all(
+		repos.map(async (repo) => {
+			logger.info(`fetch - fetchBuildZigs - ${repo.full_name}`);
+			const zigURL = getZigURL(repo);
+			const zonURL = getZonURL(repo);
+			const [zigResponse, zonResponse] = await Promise.all([
+				fetch(zigURL),
+				fetch(zonURL),
+			]);
+			return {
+				repo_id: repo.id,
+				fetched_at: Math.floor(Date.now() / 1000),
+				build_zig_content:
+					zigResponse.status === 200 ? await zigResponse.text() : null,
+				build_zig_zon_content:
+					zonResponse.status === 200 ? await zonResponse.text() : null,
+			};
+		}),
+	);
+};
+
+const upsertBuildZigs = async (conn, parsed) => {
 	const stmt = conn.prepare(`
 		INSERT INTO repo_build_zig (
 			repo_id, build_zig_content, build_zig_zon_content, fetched_at
@@ -742,106 +774,157 @@ export const fetchBuildZig = async (conn) => {
 			build_zig_zon_content = excluded.build_zig_zon_content,
 			fetched_at = excluded.fetched_at
 		`);
+
 	try {
 		const upsertMany = conn.transaction((data) => {
-			for (const row of data) {
-				stmt.run(row);
+			for (const item of data) {
+				stmt.run(
+					item.repo_id,
+					item.build_zig_content,
+					item.build_zig_zon_content,
+					item.fetched_at,
+				);
 			}
 		});
 
-		const rows = parsed.map((item) => [
-			item.repo_id,
-			item.build_zig_content,
-			item.build_zig_zon_content,
-			item.fetched_at,
-		]);
-
-		upsertMany(rows);
-		logger.info(`db - upsertBuildZig - len ${rows.length}`);
+		upsertMany(parsed);
+		logger.info(`db - upsertBuildZigs - count ${parsed.length}`);
 	} catch (e) {
-		logger.error(`db - upsertBuildZig - ${e}`);
+		logger.error(`db - upsertBuildZigs - ${e}`);
 	} finally {
-		if (stmt) stmt.finalize();
+		stmt.finalize();
 	}
 };
 
+///**
+// * @param {Database} conn
+// */
+//const fetchBuildZig = async (conn) => {
+//	// rate limit: 5000 requests per hour, 83/min
+//	// 41 because fetching both build.zig and build.zig.zon, 41 * 2 = 82
+//	const repoIdStmt = conn.prepare(`
+//		SELECT r.id, r.full_name, r.default_branch, r.platform
+//		FROM repos r
+//		LEFT JOIN repo_build_zig rbz ON r.id = rbz.repo_id
+//		WHERE (
+//			rbz.fetched_at IS NULL
+//			OR (strftime('%s', 'now') - rbz.fetched_at) > 259200
+//		)
+//		AND r.full_name NOT LIKE '%zigbee%' COLLATE NOCASE
+//		AND (r.description IS NULL OR r.description NOT LIKE '%zigbee%' COLLATE NOCASE)
+//		ORDER BY r.stars DESC
+//		LIMIT 41;`);
+//	const repos = repoIdStmt.all();
+//	const parsed = await Promise.all(repos.map((repo) => fetchZigContent(repo)));
+//	const stmt = conn.prepare(`
+//		INSERT INTO repo_build_zig (
+//			repo_id, build_zig_content, build_zig_zon_content, fetched_at
+//		) VALUES (?, ?, ?, ?)
+//		ON CONFLICT(repo_id) DO UPDATE SET
+//			build_zig_content = excluded.build_zig_content,
+//			build_zig_zon_content = excluded.build_zig_zon_content,
+//			fetched_at = excluded.fetched_at
+//		`);
+//	try {
+//		const upsertMany = conn.transaction((data) => {
+//			for (const row of data) {
+//				stmt.run(row);
+//			}
+//		});
+//
+//		const rows = parsed.map((item) => [
+//			item.repo_id,
+//			item.build_zig_content,
+//			item.build_zig_zon_content,
+//			item.fetched_at,
+//		]);
+//
+//		upsertMany(rows);
+//		logger.info(`db - upsertBuildZig - len ${rows.length}`);
+//	} catch (e) {
+//		logger.error(`db - upsertBuildZig - ${e}`);
+//	} finally {
+//		if (stmt) stmt.finalize();
+//	}
+//};
+//
+///**
+// * fetching worker and processing worker should be separate
+// *
+// * @param {Database} conn
+// */
+//const processBuildZig = async (conn) => {
+//	const stmt = conn.prepare(`
+//		SELECT build_zig_zon_content, repo_id
+//		FROM repo_build_zig
+//		WHERE build_zig_zon_content IS NOT NULL
+//	`);
+//	const rows = stmt.all();
+//	conn.exec("BEGIN TRANSACTION");
+//	try {
+//		for (const row of rows) {
+//			const data = JSON.parse(zon2json(row.build_zig_zon_content));
+//			const name = data.name;
+//			const version = data.version;
+//			const minimum_zig_version = data.minimum_zig_version ?? null;
+//			const paths = data.paths;
+//			let urlDeps = [];
+//			let deps = [];
+//			if (data.dependencies) {
+//				const transformedDependencies = transformDependencies(
+//					data.dependencies,
+//				);
+//				urlDeps = transformedDependencies.urlDeps;
+//				deps = transformedDependencies.deps;
+//			}
+//
+//			const metadataStmt = conn.prepare(`
+//				INSERT OR REPLACE INTO repo_zon (repo_id, name, version, minimum_zig_version, paths)
+//				VALUES (?, ?, ?, ?, ?)
+//			`);
+//			const pathsString = paths !== undefined ? paths.join(",") : "";
+//			metadataStmt.run(
+//				row.repo_id,
+//				name,
+//				version,
+//				minimum_zig_version,
+//				pathsString,
+//			);
+//
+//			const urlDepStmt = conn.prepare(`
+//				INSERT OR REPLACE INTO url_dependencies (hash, name, url)
+//				VALUES (?, ?, ?)
+//			`);
+//			for (const urlDep of urlDeps) {
+//				urlDepStmt.run(urlDep.hash, urlDep.name, urlDep.url);
+//			}
+//
+//			const depStmt = conn.prepare(`
+//				INSERT OR REPLACE INTO repo_dependencies (repo_id, name, dependency_type, path, url_dependency_hash)
+//				VALUES (?, ?, ?, ?, ?)
+//			`);
+//			for (const dep of deps) {
+//				depStmt.run(
+//					row.repo_id,
+//					dep.name,
+//					dep.dependency_type,
+//					dep.dependency_type === "path" ? dep.path : null,
+//					dep.dependency_type === "url" ? dep.url_dependency_hash : null,
+//				);
+//			}
+//		}
+//		conn.exec("COMMIT");
+//		logger.info("db - worker-process-build-zig - completed successfully");
+//	} catch (error) {
+//		conn.exec("ROLLBACK");
+//		logger.error(`db - worker-process-build-zig - Error: ${error}`);
+//	}
+//};
+
 /**
- * fetching worker and processing worker should be separate
- *
  * @param {Database} conn
  */
-export const processBuildZig = async (conn) => {
-	const stmt = conn.prepare(`
-		SELECT build_zig_zon_content, repo_id 
-		FROM repo_build_zig
-		WHERE build_zig_zon_content IS NOT NULL
-	`);
-	const rows = stmt.all();
-	conn.exec("BEGIN TRANSACTION");
-	try {
-		for (const row of rows) {
-			const data = JSON.parse(zon2json(row.build_zig_zon_content));
-			const name = data.name;
-			const version = data.version;
-			const minimum_zig_version = data.minimum_zig_version ?? null;
-			const paths = data.paths;
-			let urlDeps = [];
-			let deps = [];
-			if (data.dependencies) {
-				const transformedDependencies = transformDependencies(
-					data.dependencies,
-				);
-				urlDeps = transformedDependencies.urlDeps;
-				deps = transformedDependencies.deps;
-			}
-
-			const metadataStmt = conn.prepare(`
-				INSERT OR REPLACE INTO repo_zon (repo_id, name, version, minimum_zig_version, paths)
-				VALUES (?, ?, ?, ?, ?)
-			`);
-			const pathsString = paths !== undefined ? paths.join(",") : "";
-			metadataStmt.run(
-				row.repo_id,
-				name,
-				version,
-				minimum_zig_version,
-				pathsString,
-			);
-
-			const urlDepStmt = conn.prepare(`
-				INSERT OR REPLACE INTO url_dependencies (hash, name, url)
-				VALUES (?, ?, ?)
-			`);
-			for (const urlDep of urlDeps) {
-				urlDepStmt.run(urlDep.hash, urlDep.name, urlDep.url);
-			}
-
-			const depStmt = conn.prepare(`
-				INSERT OR REPLACE INTO repo_dependencies (repo_id, name, dependency_type, path, url_dependency_hash)
-				VALUES (?, ?, ?, ?, ?)
-			`);
-			for (const dep of deps) {
-				depStmt.run(
-					row.repo_id,
-					dep.name,
-					dep.dependency_type,
-					dep.dependency_type === "path" ? dep.path : null,
-					dep.dependency_type === "url" ? dep.url_dependency_hash : null,
-				);
-			}
-		}
-		conn.exec("COMMIT");
-		logger.info("db - worker-process-build-zig - completed successfully");
-	} catch (error) {
-		conn.exec("ROLLBACK");
-		logger.error(`db - worker-process-build-zig - Error: ${error}`);
-	}
-};
-
-/**
- * @param {Database} conn
- */
-export const rebuildFts = async (conn) => {
+const rebuildFts = async (conn) => {
 	logger.info("db - worker-rebuild-fts - started");
 	try {
 		conn.exec("BEGIN TRANSACTION;");
@@ -1337,6 +1420,11 @@ const NoItems = () => (
 // ----------------------------------------------------------------------------
 // globals
 
+const SECONDLY = 1000;
+const MINUTELY = 60 * SECONDLY;
+const HOURLY = 60 * MINUTELY;
+const DAILY = 24 * HOURLY;
+
 const logger = createLogger();
 
 const GITHUB_API_KEY = process.env.GITHUB_API_KEY;
@@ -1366,7 +1454,7 @@ const repoExtractors = {
 const dateGenerator = createDateGenerator();
 const tailwindcss = await Bun.file("./assets/tailwind.css").text();
 
-const db = new Database(":memory:");
+const db = new Database("db.sqlite");
 initDB(db);
 
 // ----------------------------------------------------------------------------
@@ -1569,7 +1657,13 @@ export default {
 // ----------------------------------------------------------------------------
 // crons
 
-fetchRepo(db, "github", "top");
+const parsed = await fetchRepos("github", "top");
+upsertRepos(db, parsed);
+
+const parsed2 = await fetchBuildZigs(db);
+upsertBuildZigs(db, parsed2);
+
+//fetchRepo(db, "github", "top");
 
 //fetchRepo(db, "codeberg", "top");
 //rebuildFts(db);
